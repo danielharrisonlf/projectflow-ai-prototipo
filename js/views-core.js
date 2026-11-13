@@ -397,7 +397,7 @@
 
       var strip = h("div", { class: "stat-strip", style: "margin-bottom:14px" });
       function stat(lbl, val, ctx, ctxClass, href) {
-        var s = h(href ? "a" : "div", { class: "stat" + (href ? " clickable" : ""), href: href ? "#" + href : null, style: href ? "color:inherit;text-decoration:none;display:block" : null },
+        var s = h(href ? "a" : "div", { class: "stat" + (href ? " clickable" : ""), href: href ? "#" + href : null },
           h("div", { class: "lbl" }, lbl), h("div", { class: "val" }, String(val)),
           ctx ? h("div", { class: "ctx " + (ctxClass || "") }, ctx) : null);
         strip.appendChild(s);

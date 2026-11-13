@@ -1558,7 +1558,7 @@
     }
     var t = h("div", { class: "toast " + kind },
       h("span", { class: "t-ic", "aria-hidden": "true" }, icon(icons[kind] || "info", 16)),
-      h("div", { class: "grow" }, h("b", {}, title, h("span", { class: "t-count num" })), msg ? h("span", {}, msg) : null),
+      h("div", { class: "grow" }, h("b", {}, title, h("small", { class: "t-count num" })), msg ? h("span", {}, msg) : null),
       h("button", { class: "btn btn-ghost btn-icon btn-sm toast-close", "aria-label": "Fechar aviso: " + title, style: "margin-left:auto;flex:none", onclick: dismiss }, icon("x", 12))
     );
     t._key = key; t._count = 1;
@@ -1574,7 +1574,8 @@
     t._arm();
     return t;
   };
-  PF.ROWLINK_STYLE = "background:none;border:0;padding:0;margin:0;font:inherit;color:inherit;text-align:left;cursor:pointer;text-decoration:none";
+  // reset mínimo de <button> usado como link de linha (cor, peso e foco vêm de .row-link no CSS)
+  PF.ROWLINK_STYLE = "background:none;border:0;padding:0;margin:0;text-align:left;cursor:pointer";
 
   // a Clipboard API devolve Promise: o aviso de sucesso só aparece quando a cópia acontece de fato
   PF.copyText = function (text, okTitle) {
@@ -1608,9 +1609,10 @@
   PF.field = function (label, control, opts) {
     opts = opts || {};
     if (!control.id) control.id = PF.uid("fld-");
-    var lbl = h("label", { for: control.id }, label, opts.required ? h("span", { class: "req", "aria-hidden": "true" }, " *") : null);
+    // obrigatório: asterisco visual vem de .field.required (CSS); aria-required informa o leitor de tela
+    var lbl = h("label", { for: control.id }, label);
     if (opts.required) control.setAttribute("aria-required", "true");
-    var f = h("div", { class: "field" + (opts.span2 ? " span2" : "") }, lbl, control);
+    var f = h("div", { class: "field" + (opts.span2 ? " span2" : "") + (opts.required ? " required" : "") }, lbl, control);
     if (opts.hint) {
       var hid = PF.uid("hint-");
       f.appendChild(h("span", { class: "hint", id: hid }, opts.hint));

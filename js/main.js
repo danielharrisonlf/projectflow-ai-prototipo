@@ -12,13 +12,9 @@
   var SR = "position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0";
   document.querySelectorAll(".sr-only").forEach(function (el) { el.style.cssText = SR; });
 
-  // "Pular para o conteúdo": visível só com foco; não altera o hash (o roteador usa o hash)
+  // "Pular para o conteúdo" (visível só com foco, via .skip-link no CSS); não altera o hash, que é do roteador
   var skip = document.querySelector(".skip-link");
   if (skip) {
-    var SKIP_ON = "position:fixed;left:8px;top:8px;z-index:1000;padding:8px 12px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:var(--r-ctl, 6px);font-weight:600";
-    skip.style.cssText = SR;
-    skip.addEventListener("focus", function () { skip.style.cssText = SKIP_ON; });
-    skip.addEventListener("blur", function () { skip.style.cssText = SR; });
     skip.addEventListener("click", function (e) {
       e.preventDefault();
       var main = document.getElementById("conteudo");

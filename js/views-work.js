@@ -400,13 +400,12 @@
         return h("th", { class: "sortable " + (cls || ""), "aria-sort": on ? (st.dir > 0 ? "ascending" : "descending") : "none" },
           h("button", {
             type: "button", class: "th-sort", "data-fk": "sort-" + key,
-            style: PF.ROWLINK_STYLE + ";font-weight:inherit;text-transform:inherit;letter-spacing:inherit",
             onclick: function () {
               if (st.sort === key) st.dir = -st.dir; else { st.sort = key; st.dir = 1; }
               draw();
               PF.announce("Ordenado por " + label + (st.dir > 0 ? ", crescente" : ", decrescente"));
             }
-          }, label, on ? h("span", { class: "arr", "aria-hidden": "true" }, st.dir > 0 ? "▲" : "▼") : null));
+          }, label)); // a seta vem de th[aria-sort] .th-sort no CSS
       }
 
       var tbl = h("table", { class: "tbl" },
