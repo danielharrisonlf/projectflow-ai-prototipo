@@ -27,9 +27,11 @@
       accept: h("textarea", { class: "textarea", placeholder: "Um critério de aceite por linha" })
     };
     var labelBoxes = LABELS.map(function (l) {
-      var cb = h("input", { type: "checkbox" });
-      cb.dataset.label = l;
-      return h("label", { class: "check", style: "display:inline-flex;margin-right:10px;padding:2px 0" }, cb, PF.labelChip(l));
+      var chip = PF.labelChip(l);
+      var b = h("button", { type: "button", class: "label-chip", "aria-pressed": "false", "data-label": l,
+        onclick: function () { b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true"); } }, PF.labelName(l));
+      b.style.cssText = chip.style.cssText;
+      return b;
     });
 
     function fillSelect(sel, options, value) {
@@ -55,16 +57,21 @@
       PF.field("Tipo", f.type), PF.field("Prioridade", f.priority),
       PF.field("Responsável", f.assignee), PF.field("Épico", f.epic),
       PF.field("Sprint", f.sprint), PF.field("Prazo", f.due),
-      PF.fieldGroup("Etiquetas", h("div", {}, labelBoxes), { span2: true }),
+      PF.fieldGroup("Etiquetas", h("div", { class: "chip-toggles" }, labelBoxes), { span2: true }),
       PF.field("Descrição", f.desc, { span2: true }),
       PF.field("Critérios de aceite", f.accept, { span2: true })
     );
 
+    form.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); createBtn.click(); }
+    });
+    var createBtn;
     PF.modal({
       title: "Nova tarefa", wide: true, body: form,
       foot: [
+        h("span", { class: "foot-hint" }, h("kbd", {}, "Ctrl"), h("kbd", {}, "Enter"), "cria a tarefa"),
         h("button", { class: "btn", onclick: PF.closeOverlays }, "Cancelar"),
-        h("button", { class: "btn btn-primary", onclick: function () {
+        createBtn = h("button", { class: "btn btn-primary", "aria-keyshortcuts": "Control+Enter Meta+Enter", onclick: function () {
           PF.clearInvalid(form);
           if (!f.title.value.trim()) { PF.setInvalid(f.title.closest(".field"), "Informe o título da tarefa"); return; }
           var acceptance = f.accept.value.split("\n").map(function (s) { return s.trim(); }).filter(Boolean)
@@ -74,7 +81,7 @@
             priority: f.priority.value, assigneeId: f.assignee.value || null,
             epicId: f.epic.value || null, sprintId: f.sprint.value || null,
             dueDate: f.due.value || null, desc: f.desc.value.trim(),
-            labels: labelBoxes.filter(function (l) { return l.querySelector("input").checked; }).map(function (l) { return l.querySelector("input").dataset.label; }),
+            labels: labelBoxes.filter(function (b) { return b.getAttribute("aria-pressed") === "true"; }).map(function (b) { return b.getAttribute("data-label"); }),
             acceptance: acceptance, status: defaults.status || "todo"
           });
           if (t) PF.closeOverlays();
@@ -83,20 +90,44 @@
     });
   };
 
-  /* ============================ DRAWER DE TAREFA ============================ */
+  /* ============================ DRAWER DE TAREFA (inspector) ============================ */
+  // marca a tarefa aberta no inspector (card do Kanban, linha de tabela, linha de lista)
+  function markOpen(id) {
+    PF._openTaskId = id;
+    document.querySelectorAll('#app .kcard[aria-current="true"], #app .list-item[aria-current="true"]').forEach(function (el) { el.removeAttribute("aria-current"); });
+    document.querySelectorAll("#app tr.is-selected").forEach(function (el) { el.classList.remove("is-selected"); });
+    if (!id) return;
+    var card = document.querySelector('#app [data-fk="kcard-' + id + '"]');
+    if (card) card.setAttribute("aria-current", "true");
+    var row = document.querySelector('#app [data-fk="row-' + id + '"]');
+    if (row && row.closest("tr")) row.closest("tr").classList.add("is-selected");
+    var li = document.querySelector('#app [data-fk="trow-' + id + '"]');
+    if (li) li.setAttribute("aria-current", "true");
+  }
+  // glifo decorativo (o texto ao lado já diz o valor)
+  function deco(el) { ["data-tip", "role", "aria-label"].forEach(function (a) { el.removeAttribute(a); }); el.setAttribute("aria-hidden", "true"); return el; }
+  var SRC_NODE = { ui: "accent", ai: "violet", mcp: "violet", automation: "info", api: "warn" };
+
   PF.ui.openTask = function (taskId) {
     var t0 = PF.task(taskId);
     if (!t0) return;
     if (!PF.canSeeProject(t0.projectId)) { PF.deny("ver esta tarefa"); return; }
+    var p0 = PF.project(t0.projectId);
 
+    var copyBtn = h("button", { class: "btn btn-ghost btn-icon", "aria-label": "Copiar referência " + t0.ref, onclick: function () { PF.copyText(t0.ref, "Referência " + t0.ref + " copiada"); } }, icon("copy", 15));
     var dr = PF.drawer({
       label: "Tarefa " + t0.ref,
-      head: h("div", { style: "display:flex;gap:8px;align-items:center" },
+      head: h("div", { class: "drawer-crumb" },
         PF.typeIcon(t0.type, 16),
-        h("span", { class: "mono", style: "color:var(--ink-2)" }, t0.ref)),
-      headActions: taskMenuBtn(taskId),
-      body: h("div")
+        h("span", { class: "ref" }, t0.ref),
+        h("span", { class: "sep", "aria-hidden": "true" }, icon("chevR", 12)),
+        h("a", { href: "#/projects/" + p0.id, onclick: function () { PF.closeOverlays(); } }, PF.projectDot(p0), p0.name)),
+      headActions: [copyBtn, taskMenuBtn(taskId)],
+      body: h("div"),
+      onClose: function () { markOpen(null); }
     });
+    markOpen(taskId);
+
     function render() {
       var t = PF.task(taskId);
       if (!t) { PF.closeOverlays(); return; }
@@ -106,10 +137,7 @@
       var p = PF.project(t.projectId);
 
       // título
-      var titleIn = h("textarea", {
-        class: "textarea", style: "font-size:15px;font-weight:600;min-height:40px;resize:none",
-        "aria-label": "Título da tarefa", disabled: !canEdit
-      }, t.title);
+      var titleIn = h("textarea", { class: "textarea task-title", rows: "1", "aria-label": "Título da tarefa", disabled: !canEdit }, t.title);
       titleIn.addEventListener("change", function () {
         var v = titleIn.value.trim();
         if (!v) {
@@ -120,66 +148,89 @@
         if (v !== t.title) PF.act.updateTask(t.id, { title: v });
       });
       body.appendChild(titleIn);
-      if (!canEdit) body.appendChild(h("p", { class: "subtle", style: "font-size:11.5px;margin:4px 0 0" },
-        icon("block", 11), " Somente leitura para o perfil atual."));
+      if (!canEdit) body.appendChild(h("p", { class: "ro-note" }, icon("block", 12), "Somente leitura para o perfil atual."));
 
-      // bloqueios
+      // bloqueios ativos: faixa de atenção com links para os bloqueadores
       var activeBl = t.status !== "done" ? PF.activeBlockers(t) : [];
       if (activeBl.length) {
-        var bl = h("div", { class: "chip warn", style: "margin-top:8px" }, icon("block", 12), "Bloqueada por ");
-        activeBl.forEach(function (bt) {
-          bl.appendChild(h("a", { href: "#", class: "mono", style: "color:inherit;margin-left:4px", onclick: function (e) { e.preventDefault(); PF.ui.openTask(bt.id); } }, bt.ref));
+        var blTxt = h("span", {}, "Bloqueada por ");
+        activeBl.forEach(function (bt, i) {
+          if (i) blTxt.appendChild(document.createTextNode(", "));
+          blTxt.appendChild(h("a", { href: "#", onclick: function (e) { e.preventDefault(); PF.ui.openTask(bt.id); } }, bt.ref));
         });
-        body.appendChild(bl);
+        body.appendChild(h("div", { class: "banner warn", role: "status" }, icon("block", 14), blTxt));
       }
 
       // propriedades
       var props = h("div", { class: "task-props" });
-      function prop(label, control) { props.appendChild(h("span", { class: "pl" }, label)); props.appendChild(control); }
+      function prop(label, ic, control) {
+        props.appendChild(h("span", { class: "pl" }, icon(ic, 14), label));
+        props.appendChild(control);
+      }
 
-      prop("Status", canEdit ? PF.select(PF.STATUSES.map(function (s) { return { value: s, label: PF.STATUS_META[s].label }; }), t.status,
-        function (v) { PF.act.moveTask(t.id, v); }) : PF.statusChip(t.status));
-      prop("Prioridade", canEdit ? PF.select(PF.PRIORITIES.map(function (pr) { return { value: pr, label: PF.PRIO_META[pr].label }; }), t.priority,
-        function (v) { PF.act.updateTask(t.id, { priority: v }); }) : PF.prioChip(t.priority));
+      prop("Status", "check2", canEdit ? PF.propButton({
+        label: "Status", fk: "prop-status", value: t.status,
+        options: PF.STATUSES.map(function (s) { return { value: s, label: PF.STATUS_META[s].label, node: function () { return PF.statusIcon(s); } }; }),
+        onChange: function (v) { PF.act.moveTask(t.id, v); }
+      }) : PF.propValue(PF.statusIcon(t.status), PF.STATUS_META[t.status].label));
+
+      prop("Prioridade", "flag", canEdit ? PF.propButton({
+        label: "Prioridade", fk: "prop-priority", value: t.priority,
+        options: PF.PRIORITIES.map(function (pr) { return { value: pr, label: PF.PRIO_META[pr].label, node: function () { return deco(PF.prioChip(pr, true)); } }; }),
+        onChange: function (v) { PF.act.updateTask(t.id, { priority: v }); }
+      }) : PF.propValue(deco(PF.prioChip(t.priority, true)), PF.PRIO_META[t.priority].label));
 
       var me = PF.me();
       var members = PF.projectMembers(p.id).filter(function (u) { return PF.can("task.assign") || u.id === me.id; });
       // o responsável atual sempre aparece (mesmo que tenha saído da equipe)
       if (t.assigneeId && !members.some(function (u) { return u.id === t.assigneeId; }) && PF.user(t.assigneeId)) members.push(PF.user(t.assigneeId));
       var canAssign = canEdit && (PF.can("task.assign") || !t.assigneeId || t.assigneeId === me.id);
-      prop("Responsável", canAssign ? PF.select([{ value: "", label: "Sem responsável" }].concat(members.map(function (u) { return { value: u.id, label: u.name }; })), t.assigneeId || "",
-        function (v) { PF.act.updateTask(t.id, { assigneeId: v || null }); }) : PF.whoCell(t.assigneeId));
+      var who = PF.user(t.assigneeId);
+      function av(u) { return function () { var a = PF.avatarEl(u, "sm"); a.setAttribute("aria-hidden", "true"); a.removeAttribute("data-tip"); return a; }; }
+      prop("Responsável", "user", canAssign ? PF.propButton({
+        label: "Responsável", fk: "prop-assignee", value: t.assigneeId || "", empty: "Sem responsável",
+        options: [{ value: "", label: "Sem responsável", node: av(null) }].concat(members.map(function (u) { return { value: u.id, label: u.name, node: av(u) }; })),
+        onChange: function (v) { PF.act.updateTask(t.id, { assigneeId: v || null }); }
+      }) : PF.propValue(av(who)(), who ? who.name : "Sem responsável", !who));
 
-      prop("Equipe", canEdit ? PF.select(p.teamIds.map(function (tid) { var tm = PF.team(tid); return { value: tid, label: tm ? tm.name : tid }; }), t.teamId,
-        function (v) { PF.act.updateTask(t.id, { teamId: v }); }) : h("span", {}, (PF.team(t.teamId) || {}).name || "—"));
+      var team = PF.team(t.teamId);
+      prop("Equipe", "users", canEdit ? PF.propButton({
+        label: "Equipe", fk: "prop-team", value: t.teamId, icon: "users",
+        options: p.teamIds.map(function (tid) { var tm = PF.team(tid); return { value: tid, label: tm ? tm.name : tid }; }),
+        onChange: function (v) { PF.act.updateTask(t.id, { teamId: v }); }
+      }) : PF.propValue(null, team ? team.name : "—", !team));
 
-      prop("Épico", canEdit ? PF.select([{ value: "", label: "Sem épico" }].concat(PF.epicsOf(p.id).map(function (e) { return { value: e.id, label: e.name }; })), t.epicId || "",
-        function (v) { PF.act.updateTask(t.id, { epicId: v || null }); }) : h("span", {}, (PF.byId("epics", t.epicId) || { name: "—" }).name));
+      var epic = PF.byId("epics", t.epicId);
+      prop("Épico", "epic", canEdit ? PF.propButton({
+        label: "Épico", fk: "prop-epic", value: t.epicId || "", empty: "Sem épico",
+        options: [{ value: "", label: "Sem épico" }].concat(PF.epicsOf(p.id).map(function (e) { return { value: e.id, label: e.name, node: function () { return deco(PF.typeIcon("epic")); } }; })),
+        onChange: function (v) { PF.act.updateTask(t.id, { epicId: v || null }); }
+      }) : PF.propValue(epic ? deco(PF.typeIcon("epic")) : null, epic ? epic.name : "Sem épico", !epic));
 
       var SPRINT_ST = { active: "ativa", planned: "planejada", done: "encerrada" };
-      var sprintOpts = PF.sprintsOf(p.id).filter(function (s) { return s.status !== "done" || s.id === t.sprintId; })
-        .map(function (s) { return { value: s.id, label: s.name + " (" + SPRINT_ST[s.status] + ")" }; });
-      prop("Sprint", canEdit ? PF.select([{ value: "", label: "Sem sprint" }].concat(sprintOpts), t.sprintId || "",
-        function (v) { PF.act.updateTask(t.id, { sprintId: v || null }); }) : h("span", {}, (PF.byId("sprints", t.sprintId) || { name: "—" }).name));
+      var sprint = PF.byId("sprints", t.sprintId);
+      prop("Sprint", "sprint", canEdit ? PF.propButton({
+        label: "Sprint", fk: "prop-sprint", value: t.sprintId || "", empty: "Sem sprint", icon: "sprint",
+        options: [{ value: "", label: "Sem sprint" }].concat(PF.sprintsOf(p.id).filter(function (s) { return s.status !== "done" || s.id === t.sprintId; })
+          .map(function (s) { return { value: s.id, label: s.name + " (" + SPRINT_ST[s.status] + ")" }; })),
+        onChange: function (v) { PF.act.updateTask(t.id, { sprintId: v || null }); }
+      }) : PF.propValue(null, sprint ? sprint.name : "Sem sprint", !sprint));
 
-      var dueIn = h("input", { class: "input", type: "date", value: t.dueDate || "", disabled: !canEdit });
+      var dueIn = h("input", { class: "input", type: "date", value: t.dueDate || "", disabled: !canEdit, "aria-label": "Prazo" });
       dueIn.addEventListener("change", function () { PF.act.updateTask(t.id, { dueDate: dueIn.value || null }); });
-      var dueWrap = h("div", { style: "display:flex;gap:8px;align-items:center" }, dueIn);
-      if (PF.isOverdue(t)) dueWrap.appendChild(h("span", { class: "chip danger" }, "Atrasada"));
-      prop("Prazo", dueWrap);
+      var dueWrap = h("div", { class: "pv-row" }, dueIn);
+      if (PF.isOverdue(t)) dueWrap.appendChild(h("span", { class: "chip danger" }, (-PF.daysLeft(t.dueDate)) + "d de atraso"));
+      else if (t.dueDate && t.status !== "done" && PF.daysLeft(t.dueDate) <= 2) dueWrap.appendChild(h("span", { class: "chip warn" }, PF.daysLeft(t.dueDate) === 0 ? "Vence hoje" : "Vence em " + PF.daysLeft(t.dueDate) + "d"));
+      prop("Prazo", "calendar", dueWrap);
 
-      prop("Projeto", h("a", { href: "#/projects/" + p.id, onclick: function () { PF.closeOverlays(); } }, p.name));
-      props.appendChild(h("span", { class: "pl" }, "Criada"));
-      props.appendChild(h("span", { class: "muted", style: "font-size:12px" }, PF.fmtDateTime(t.createdAt) + " · atualizada " + PF.rel(t.updatedAt)));
-      body.appendChild(props);
-
-      // etiquetas
-      var labRow = h("div", { style: "display:flex;gap:6px;flex-wrap:wrap;align-items:center" });
+      // etiquetas e bloqueios como propriedades
+      var labRow = h("div", { class: "pv-row" });
       t.labels.forEach(function (l) { labRow.appendChild(PF.labelChip(l)); });
       if (canEdit) {
-        var addLab = h("button", { class: "btn btn-ghost btn-sm", "aria-haspopup": "menu", "aria-expanded": "false" }, icon("tag", 13), "Etiquetas");
+        var addLab = h("button", { type: "button", class: "prop-btn" + (t.labels.length ? "" : " is-empty"), "aria-label": t.labels.length ? "Editar etiquetas" : "Adicionar etiquetas", "aria-haspopup": "menu", "aria-expanded": "false", "data-fk": "prop-labels" },
+          icon(t.labels.length ? "edit" : "plus", 13), h("span", { class: "pv" }, t.labels.length ? "Editar" : "Adicionar"));
         addLab.addEventListener("click", function () {
-          PF.menu(addLab, LABELS.map(function (l) {
+          PF.menu(addLab, [{ head: "Etiquetas" }].concat(LABELS.map(function (l) {
             return {
               label: PF.labelName(l), checked: t.labels.indexOf(l) >= 0,
               onClick: function () {
@@ -189,10 +240,20 @@
                 PF.act.updateTask(t.id, { labels: ls });
               }
             };
-          }));
+          })), { label: "Etiquetas" });
         });
         labRow.appendChild(addLab);
-        var blockBtn = h("button", { class: "btn btn-ghost btn-sm", "aria-haspopup": "menu", "aria-expanded": "false" }, icon("block", 13), "Bloqueios");
+      } else if (!t.labels.length) labRow.appendChild(h("span", { class: "subtle" }, "Sem etiquetas"));
+      prop("Etiquetas", "tag", labRow);
+
+      var blRow = h("div", { class: "pv-row" });
+      t.blockedBy.map(PF.task).filter(Boolean).forEach(function (bt) {
+        blRow.appendChild(h("a", { href: "#", class: "chip" + (bt.status === "done" ? "" : " warn"), onclick: function (e) { e.preventDefault(); PF.ui.openTask(bt.id); } },
+          h("span", { class: "mono" }, bt.ref)));
+      });
+      if (canEdit) {
+        var blockBtn = h("button", { type: "button", class: "prop-btn" + (t.blockedBy.length ? "" : " is-empty"), "aria-label": t.blockedBy.length ? "Editar bloqueios" : "Adicionar bloqueio", "aria-haspopup": "menu", "aria-expanded": "false", "data-fk": "prop-blocks" },
+          icon(t.blockedBy.length ? "edit" : "plus", 13), h("span", { class: "pv" }, t.blockedBy.length ? "Editar" : "Adicionar"));
         blockBtn.addEventListener("click", function () {
           var current = t.blockedBy.map(PF.task).filter(Boolean);
           var candidates = PF.projectTasks(p.id).filter(function (x) {
@@ -209,21 +270,27 @@
                 PF.act.updateTask(t.id, { blockedBy: bb });
               }
             };
-          })));
+          })), { label: "Bloqueios" });
         });
-        labRow.appendChild(blockBtn);
-      }
-      body.appendChild(labRow);
+        blRow.appendChild(blockBtn);
+      } else if (!t.blockedBy.length) blRow.appendChild(h("span", { class: "subtle" }, "Nenhum"));
+      prop("Bloqueada por", "block", blRow);
+
+      prop("Criada", "clock", h("span", { class: "meta-line" }, PF.fmtDateTime(t.createdAt) + " · atualizada " + PF.rel(t.updatedAt)));
+      body.appendChild(props);
 
       // descrição
-      body.appendChild(h("div", { class: "section-h" }, "Descrição"));
-      var descIn = h("textarea", { class: "textarea", placeholder: "Sem descrição.", disabled: !canEdit }, t.desc || "");
+      body.appendChild(h("h2", { class: "section-h" }, "Descrição"));
+      var descIn = h("textarea", { class: "textarea", placeholder: "Sem descrição.", disabled: !canEdit, "aria-label": "Descrição" }, t.desc || "");
       descIn.addEventListener("change", function () { PF.act.updateTask(t.id, { desc: descIn.value.trim() }); });
       body.appendChild(descIn);
 
       // critérios de aceite
-      body.appendChild(h("div", { class: "section-h" }, "Critérios de aceite"));
-      if (!t.acceptance.length) body.appendChild(h("p", { class: "subtle", style: "font-size:12px" }, "Nenhum critério definido."));
+      var accDone = t.acceptance.filter(function (a) { return a.done; }).length;
+      body.appendChild(h("h2", { class: "section-h" }, "Critérios de aceite",
+        t.acceptance.length ? h("span", { class: "sh-aside" }, accDone + "/" + t.acceptance.length + " atendidos") : null));
+      if (t.acceptance.length) body.appendChild(PF.progressBar(100 * accDone / t.acceptance.length, accDone === t.acceptance.length, "Critérios atendidos"));
+      if (!t.acceptance.length) body.appendChild(h("p", { class: "subtle" }, "Nenhum critério definido."));
       t.acceptance.forEach(function (a, idx) {
         var cb = h("input", { type: "checkbox", disabled: !canEdit, "aria-label": a.text });
         cb.checked = a.done;
@@ -240,18 +307,24 @@
             PF.act.updateTask(t.id, { acceptance: t.acceptance.concat([{ text: accIn.value.trim(), done: false }]) });
           }
         });
-        body.appendChild(h("div", { style: "margin-top:6px" }, accIn));
+        body.appendChild(h("div", { class: "add-row" }, accIn));
       }
 
       // subtarefas
       var subs = PF.db.tasks.filter(function (x) { return x.parentId === t.id; });
       if (subs.length || (canEdit && !t.parentId)) {
-        body.appendChild(h("div", { class: "section-h" }, "Subtarefas (" + subs.length + ")"));
-        subs.forEach(function (s) {
-          body.appendChild(h("button", { class: "menu-item", style: "width:100%", onclick: function () { PF.ui.openTask(s.id); } },
-            PF.statusIcon(s.status), h("span", { class: "mono", style: "font-size:11px;color:var(--ink-3)" }, s.ref),
-            h("span", { class: "grow" }, s.title), PF.avatarEl(PF.user(s.assigneeId), "sm")));
-        });
+        var subDone = subs.filter(function (x) { return x.status === "done"; }).length;
+        body.appendChild(h("h2", { class: "section-h" }, "Subtarefas", h("span", { class: "count" }, String(subs.length)),
+          subs.length ? h("span", { class: "sh-aside" }, subDone + "/" + subs.length + " concluídas") : null));
+        if (subs.length) {
+          var subList = h("div", { class: "list sub-list" });
+          subs.forEach(function (s) {
+            subList.appendChild(h("button", { type: "button", class: "list-item compact", onclick: function () { PF.ui.openTask(s.id); } },
+              PF.statusIcon(s.status), h("span", { class: "li-ref" }, s.ref),
+              h("span", { class: "li-main" }, h("span", { class: "li-title" }, s.title)), PF.avatarEl(PF.user(s.assigneeId), "sm")));
+          });
+          body.appendChild(subList);
+        }
         if (canEdit && !t.parentId) {
           var subIn = h("input", { class: "input", placeholder: "Nova subtarefa e Enter…", "aria-label": "Nova subtarefa" });
           subIn.addEventListener("keydown", function (e) {
@@ -259,39 +332,43 @@
               PF.act.createTask({ projectId: t.projectId, parentId: t.id, type: "subtask", title: subIn.value.trim(), epicId: t.epicId, sprintId: t.sprintId, teamId: t.teamId, silent: true });
             }
           });
-          body.appendChild(h("div", { style: "margin-top:6px" }, subIn));
+          body.appendChild(h("div", { class: "add-row" }, subIn));
         }
       }
 
       // comentários
       var cms = PF.db.comments.filter(function (c) { return c.taskId === t.id; }).sort(function (a, b) { return PF.cmp(a.createdAt, b.createdAt); });
-      body.appendChild(h("div", { class: "section-h" }, "Comentários (" + cms.length + ")"));
+      body.appendChild(h("h2", { class: "section-h" }, "Comentários", h("span", { class: "count" }, String(cms.length))));
       cms.forEach(function (c) {
         var u = PF.user(c.userId);
         body.appendChild(h("div", { class: "comment" },
-          PF.avatarEl(u, "sm"),
+          PF.avatarEl(u),
           h("div", { class: "grow" },
             h("div", { class: "c-head" }, h("b", {}, u ? u.name : "?"), h("time", {}, PF.rel(c.createdAt))),
             h("div", { class: "c-body" }, c.text))));
       });
-      var cmIn = h("textarea", { class: "textarea", placeholder: "Escreva um comentário… use @Nome Sobrenome para mencionar", style: "min-height:52px" });
-      var cmBtn = h("button", { class: "btn btn-primary btn-sm", onclick: function () {
-        if (!cmIn.value.trim()) return;
-        PF.act.addComment(t.id, cmIn.value.trim());
-      } }, icon("send", 13), "Comentar");
-      body.appendChild(h("div", { style: "margin-top:8px" }, cmIn, h("div", { style: "margin-top:6px;display:flex;justify-content:flex-end" }, cmBtn)));
+      var cmIn = h("textarea", { class: "textarea", placeholder: "Escreva um comentário… use @Nome Sobrenome para mencionar", "aria-label": "Novo comentário", "aria-keyshortcuts": "Control+Enter Meta+Enter" });
+      function sendComment() { if (cmIn.value.trim()) PF.act.addComment(t.id, cmIn.value.trim()); }
+      cmIn.addEventListener("keydown", function (e) { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendComment(); } });
+      var cmBtn = h("button", { class: "btn btn-primary btn-sm", onclick: sendComment }, icon("send", 13), "Comentar");
+      body.appendChild(h("div", { class: "comment-box" }, cmIn,
+        h("div", { class: "cb-foot" }, h("span", { class: "hint" }, h("kbd", {}, "Ctrl"), h("kbd", {}, "Enter"), "envia"), cmBtn)));
 
-      // histórico
+      // histórico (linha do tempo; a origem aparece no nó e no rótulo)
       var hist = PF.db.audit.filter(function (a) { return a.entityType === "task" && a.entityId === t.id; }).slice(0, 12);
-      body.appendChild(h("div", { class: "section-h" }, "Histórico"));
-      if (!hist.length) body.appendChild(h("p", { class: "subtle", style: "font-size:12px" }, "Sem registros ainda."));
-      hist.forEach(function (a) {
-        var u = PF.user(a.userId);
-        body.appendChild(h("div", { class: "hist-item" },
-          h("span", { class: "src-tag " + a.source }, PF.sourceLabel(a.source)),
-          h("span", { class: "grow" }, h("b", {}, u ? u.name : "?"), " " + a.summary),
-          h("time", {}, PF.rel(a.ts))));
-      });
+      body.appendChild(h("h2", { class: "section-h" }, "Histórico"));
+      if (!hist.length) body.appendChild(h("p", { class: "subtle" }, "Sem registros ainda."));
+      else {
+        var tl = h("div", { class: "timeline" });
+        hist.forEach(function (a) {
+          var u = PF.user(a.userId);
+          tl.appendChild(h("div", { class: "hist-item" },
+            h("span", { class: "tl-node " + (SRC_NODE[a.source] || ""), "aria-hidden": "true" }, icon(a.source === "ai" || a.source === "mcp" ? "sparkle" : a.source === "automation" ? "refresh" : a.source === "api" ? "plug" : "user", 11)),
+            h("span", { class: "tl-txt" }, h("span", { class: "src-tag " + a.source }, PF.sourceLabel(a.source)), " ", h("b", {}, u ? u.name : "?"), " " + a.summary),
+            h("time", {}, PF.rel(a.ts))));
+        });
+        body.appendChild(tl);
+      }
     }
     PF._drawerRefresh = render;
     render();
@@ -332,17 +409,18 @@
     var qIn = h("input", { class: "input search", type: "search", placeholder: "Buscar por título ou ID…", value: st.q, "aria-label": "Buscar tarefas", "data-fk": "tbl-busca" });
     qIn.addEventListener("input", function () { st.q = qIn.value; st.page = 0; draw(); });
     fbar.appendChild(qIn);
-    var selStatus = PF.select([{ value: "", label: "Todos os status" }].concat(PF.STATUSES.map(function (s) { return { value: s, label: PF.STATUS_META[s].label }; })), st.status, function (v) { st.status = v; st.page = 0; draw(); }, { "aria-label": "Status" });
-    var selPrio = PF.select([{ value: "", label: "Todas as prioridades" }].concat(PF.PRIORITIES.map(function (p) { return { value: p, label: PF.PRIO_META[p].label }; })), st.priority, function (v) { st.priority = v; st.page = 0; draw(); }, { "aria-label": "Prioridade" });
-    fbar.append(selStatus, selPrio);
-    var selWho = null;
+    var fsStatus = PF.filterSelect("Status", [{ value: "", label: "Todos" }].concat(PF.STATUSES.map(function (s) { return { value: s, label: PF.STATUS_META[s].label }; })), st.status, function (v) { st.status = v; st.page = 0; draw(); });
+    var fsPrio = PF.filterSelect("Prioridade", [{ value: "", label: "Todas" }].concat(PF.PRIORITIES.map(function (p) { return { value: p, label: PF.PRIO_META[p].label }; })), st.priority, function (v) { st.priority = v; st.page = 0; draw(); });
+    fbar.append(fsStatus, fsPrio);
+    var fsWho = null;
     if (!opts.assigneeId) {
-      selWho = PF.select([{ value: "", label: "Todos os responsáveis" }].concat(PF.scopeUsers().filter(function (u) { return !u.invited; }).map(function (u) { return { value: u.id, label: u.name }; })), st.assignee, function (v) { st.assignee = v; st.page = 0; draw(); }, { "aria-label": "Responsável" });
-      fbar.appendChild(selWho);
+      fsWho = PF.filterSelect("Responsável", [{ value: "", label: "Todos" }].concat(PF.scopeUsers().filter(function (u) { return !u.invited; }).map(function (u) { return { value: u.id, label: u.name }; })), st.assignee, function (v) { st.assignee = v; st.page = 0; draw(); });
+      fbar.appendChild(fsWho);
     }
     var clearBtn = h("button", { class: "btn btn-ghost btn-sm", onclick: function () {
       st.q = st.status = st.priority = st.assignee = ""; st.page = 0;
-      qIn.value = ""; selStatus.value = ""; selPrio.value = ""; if (selWho) selWho.value = "";
+      qIn.value = "";
+      [fsStatus, fsPrio, fsWho].forEach(function (f) { if (f) f.querySelector("select").value = ""; });
       draw(); qIn.focus();
     } }, icon("x", 12), "Limpar");
     fbar.appendChild(clearBtn);
@@ -356,7 +434,10 @@
       if (fk && (document.activeElement === document.body || !document.activeElement)) PF.restoreFocus(fk);
     }
     function drawTable() {
-      clearBtn.style.display = (st.q || st.status || st.priority || st.assignee) ? "" : "none";
+      clearBtn.hidden = !(st.q || st.status || st.priority || st.assignee);
+      fsStatus.classList.toggle("is-set", !!st.status);
+      fsPrio.classList.toggle("is-set", !!st.priority);
+      if (fsWho) fsWho.classList.toggle("is-set", !!st.assignee);
       holder.replaceChildren();
       var tasks = PF.visibleTasks().filter(function (t) {
         if (t.parentId) return false;
@@ -390,8 +471,12 @@
       var slice = tasks.slice(st.page * PAGE, st.page * PAGE + PAGE);
 
       if (!tasks.length) {
-        holder.appendChild(PF.emptyState("tasks", "Nenhuma tarefa encontrada", "Ajuste os filtros ou crie uma nova tarefa.",
-          PF.can("task.create") ? h("button", { class: "btn btn-primary", onclick: function () { PF.ui.taskModal({ projectId: opts.projectId }); } }, icon("plus", 14), "Nova tarefa") : null));
+        var filtered = st.q || st.status || st.priority || st.assignee;
+        holder.appendChild(filtered
+          ? PF.emptyState("filter", "Nenhuma tarefa corresponde aos filtros", "Ajuste a busca ou limpe os filtros para ver todas as tarefas.",
+            h("button", { class: "btn", onclick: function () { clearBtn.click(); } }, icon("x", 12), "Limpar filtros"))
+          : PF.emptyState("tasks", "Nenhuma tarefa por aqui", "Crie uma tarefa para começar.",
+            PF.can("task.create") ? h("button", { class: "btn btn-primary", onclick: function () { PF.ui.taskModal({ projectId: opts.projectId }); } }, icon("plus", 14), "Nova tarefa") : null));
         return;
       }
 
@@ -410,7 +495,7 @@
 
       var tbl = h("table", { class: "tbl" },
         h("thead", {}, h("tr", {},
-          h("th", { style: "width:34px" }, h("span", { style: PF.SR_STYLE }, "Tipo")),
+          h("th", { class: "col-icon" }, h("span", { class: "sr-only" }, "Tipo")),
           th("ref", "ID"), th("title", "Título"), th("status", "Status"),
           th("priority", "Prioridade"), h("th", {}, "Responsável"),
           opts.projectId ? h("th", {}, "Sprint") : h("th", {}, "Projeto"),
@@ -418,20 +503,22 @@
       var tb = h("tbody");
       slice.forEach(function (t) {
         var late = PF.isOverdue(t);
-        tb.appendChild(h("tr", { class: "row-click", onclick: function () { PF.ui.openTask(t.id); } },
+        var proj = PF.project(t.projectId);
+        tb.appendChild(h("tr", { class: "row-click" + (PF._openTaskId === t.id ? " is-selected" : ""), onclick: function () { PF.ui.openTask(t.id); } },
           h("td", {}, PF.typeIcon(t.type)),
-          h("td", { class: "mono nowrap" }, t.ref),
-          h("td", {}, h("div", {}, h("button", { type: "button", class: "row-link", style: PF.ROWLINK_STYLE, "data-fk": "row-" + t.id, "aria-label": t.ref + " — " + t.title }, t.title),
-            PF.isBlocked(t) ? h("span", { class: "chip warn", style: "margin-left:6px" }, "Bloqueada") : null,
-            h("div", {}, t.labels.map(function (l) { var c = PF.labelChip(l); c.style.marginRight = "4px"; return c; })))),
+          h("td", { class: "mono nowrap subtle" }, t.ref),
+          h("td", {}, h("div", { class: "cell-title" },
+            h("div", { class: "tt" }, h("button", { type: "button", class: "row-link", "data-fk": "row-" + t.id, "aria-label": t.ref + " — " + t.title }, t.title),
+              PF.isBlocked(t) ? h("span", { class: "chip warn" }, icon("block", 12), "Bloqueada") : null),
+            t.labels.length ? h("div", { class: "cell-chips" }, t.labels.map(function (l) { return PF.labelChip(l); })) : null)),
           h("td", {}, PF.statusChip(t.status)),
           h("td", {}, PF.prioChip(t.priority)),
           h("td", {}, PF.whoCell(t.assigneeId)),
           opts.projectId
-            ? h("td", {}, (PF.byId("sprints", t.sprintId) || { name: "—" }).name)
-            : h("td", {}, PF.project(t.projectId).name),
-          h("td", { class: "nowrap" }, t.dueDate ? h("span", { style: late ? "color:var(--danger);font-weight:600" : "" }, PF.fmtDate(t.dueDate)) : h("span", { class: "subtle" }, "—")),
-          h("td", { class: "nowrap muted", style: "font-size:11.5px" }, PF.rel(t.updatedAt))));
+            ? h("td", {}, t.sprintId ? (PF.byId("sprints", t.sprintId) || { name: "—" }).name : h("span", { class: "subtle" }, "—"))
+            : h("td", {}, h("span", { class: "cell-main" }, PF.projectDot(proj), proj.name)),
+          h("td", { class: "date" }, t.dueDate ? h("span", { class: late ? "text-danger" : "" }, PF.fmtDate(t.dueDate)) : h("span", { class: "subtle" }, "—")),
+          h("td", { class: "date subtle" }, PF.rel(t.updatedAt))));
       });
       tbl.appendChild(tb);
 
@@ -468,6 +555,7 @@
   };
 
   /* ============================ SELETOR DE PROJETO ============================ */
+  // mesmo controle e mesma posição (ao lado do título) em Kanban, Backlog e Sprints
   function projectPicker() {
     var projects = PF.visibleProjects().filter(function (p) { return p.status !== "done"; });
     var cur = PF.project(PF.db.settings.currentProjectId);
@@ -477,13 +565,31 @@
     }
     if (!cur) return { el: h("span", { class: "muted" }, "Nenhum projeto disponível"), project: null };
     var sel = PF.select(projects.map(function (p) { return { value: p.id, label: p.name + " (" + p.key + ")" }; }), cur.id,
-      function (v) { PF.act.setCurrentProject(v); }, { "aria-label": "Projeto atual", style: "min-width:220px;font-weight:600" });
-    return { el: sel, project: cur };
+      function (v) { PF.act.setCurrentProject(v); }, { "aria-label": "Projeto atual", "data-fk": "project-switch" });
+    var dot = PF.projectDot(cur, true);
+    return { el: h("div", { class: "project-switch" }, dot, sel), project: cur };
   }
 
   /* ============================ KANBAN ============================ */
   var boardF = { q: "", assignee: "", priority: "", label: "", sprint: "", group: "none" };
   var quickAddOpen = null; // coluna com criação rápida aberta (sobrevive ao re-render)
+  var SORT_LABEL = { none: "Criação", priority: "Prioridade", due: "Prazo" };
+
+  // filtros do quadro: nome, opções (valor, rótulo, glifo) e rótulo do valor atual
+  function boardFilterDefs(p) {
+    return [
+      { key: "assignee", name: "Responsável", ic: "user", all: "Todos",
+        options: PF.projectMembers(p.id).map(function (u) { return { value: u.id, label: u.name, node: function () { var a = PF.avatarEl(u, "sm"); a.setAttribute("aria-hidden", "true"); a.removeAttribute("data-tip"); return a; } }; }) },
+      { key: "priority", name: "Prioridade", ic: "flag", all: "Todas",
+        options: PF.PRIORITIES.map(function (pr) { return { value: pr, label: PF.PRIO_META[pr].label, node: function () { var g = PF.prioChip(pr, true); g.removeAttribute("role"); g.removeAttribute("aria-label"); g.removeAttribute("data-tip"); g.setAttribute("aria-hidden", "true"); return g; } }; }) },
+      { key: "sprint", name: "Sprint", ic: "sprint", all: "Todas",
+        options: PF.sprintsOf(p.id).map(function (s) { return { value: s.id, label: s.name + (s.status === "active" ? " (ativa)" : s.status === "done" ? " (encerrada)" : "") }; }) },
+      { key: "label", name: "Etiqueta", ic: "tag", all: "Todas",
+        options: LABELS.map(function (l) { return { value: l, label: PF.labelName(l) }; }) }
+    ];
+  }
+  function clearBoardFilters() { boardF.q = boardF.assignee = boardF.priority = boardF.sprint = boardF.label = ""; }
+  function focusFk(k) { var el = document.querySelector('[data-fk="' + k + '"]'); if (el) el.focus(); }
 
   PF.routes.board = {
     title: "Kanban", app: "workspace", wide: true,
@@ -499,23 +605,55 @@
 
       page.appendChild(PF.ui.pageHead("Kanban", null, [
         PF.can("task.create") ? h("button", { class: "btn btn-primary", onclick: function () { PF.ui.taskModal({ projectId: p.id }); } }, icon("plus", 14), "Nova tarefa") : null
-      ]));
+      ], pick.el));
 
-      var fbar = h("div", { class: "fbar" });
-      fbar.appendChild(pick.el);
+      // barra de visão: busca · Filtro (popover) · chips removíveis · Ordenar
+      var defs = boardFilterDefs(p);
+      var vb = h("div", { class: "fbar viewbar" });
       var qIn = h("input", { class: "input search", type: "search", placeholder: "Buscar por título ou ID…", value: boardF.q, "aria-label": "Buscar no quadro", "data-fk": "board-busca" });
       var deb = null;
       qIn.addEventListener("input", function () { clearTimeout(deb); deb = setTimeout(function () { boardF.q = qIn.value; PF.refresh(); }, 180); });
-      fbar.appendChild(qIn);
-      fbar.appendChild(PF.select([{ value: "", label: "Responsável: todos" }].concat(PF.projectMembers(p.id).map(function (u) { return { value: u.id, label: u.name }; })), boardF.assignee, function (v) { boardF.assignee = v; PF.refresh(); }, { "aria-label": "Responsável" }));
-      fbar.appendChild(PF.select([{ value: "", label: "Prioridade: todas" }].concat(PF.PRIORITIES.map(function (pr) { return { value: pr, label: PF.PRIO_META[pr].label }; })), boardF.priority, function (v) { boardF.priority = v; PF.refresh(); }, { "aria-label": "Prioridade" }));
-      fbar.appendChild(PF.select([{ value: "", label: "Sprint: todas" }].concat(PF.sprintsOf(p.id).map(function (s) { return { value: s.id, label: s.name }; })), boardF.sprint, function (v) { boardF.sprint = v; PF.refresh(); }, { "aria-label": "Sprint" }));
-      fbar.appendChild(PF.select([{ value: "", label: "Etiqueta: todas" }].concat(LABELS.map(function (l) { return { value: l, label: PF.labelName(l) }; })), boardF.label, function (v) { boardF.label = v; PF.refresh(); }, { "aria-label": "Etiqueta" }));
-      fbar.appendChild(PF.select([{ value: "none", label: "Ordenar: criação" }, { value: "priority", label: "Ordenar: prioridade" }, { value: "due", label: "Ordenar: prazo" }], boardF.group, function (v) { boardF.group = v; PF.refresh(); }, { "aria-label": "Ordenação" }));
-      if (boardF.q || boardF.assignee || boardF.priority || boardF.sprint || boardF.label) {
-        fbar.appendChild(h("button", { class: "btn btn-ghost btn-sm", onclick: function () { boardF.q = boardF.assignee = boardF.priority = boardF.sprint = boardF.label = ""; qIn.value = ""; PF.refresh(); } }, icon("x", 12), "Limpar"));
+      vb.appendChild(qIn);
+
+      var active = defs.filter(function (d) { return boardF[d.key]; });
+      var filterBtn = h("button", { class: "btn", "aria-haspopup": "menu", "aria-expanded": "false", "data-fk": "board-filtro",
+        "aria-label": active.length ? "Filtro, " + PF.plural(active.length, "ativo", "ativos") : "Filtro" },
+        icon("filter", 14), "Filtro", active.length ? h("span", { class: "btn-count", "aria-hidden": "true" }, String(active.length)) : null);
+      function valueMenu(d) {
+        PF.menu(filterBtn, [{ head: d.name }, { label: d.all, checked: !boardF[d.key], radio: true, onClick: function () { boardF[d.key] = ""; PF.refresh(); } }]
+          .concat(d.options.map(function (o) {
+            return { label: o.label, node: o.node ? o.node() : null, checked: boardF[d.key] === o.value, radio: true,
+              onClick: function () { boardF[d.key] = o.value; PF.refresh(); } };
+          })), { label: d.name });
       }
-      page.appendChild(fbar);
+      filterBtn.addEventListener("click", function () {
+        PF.menu(filterBtn, [{ head: "Filtrar por" }].concat(defs.map(function (d) {
+          var cur = d.options.filter(function (o) { return o.value === boardF[d.key]; })[0];
+          return { icon: d.ic, label: d.name, sub: cur ? cur.label : null, onClick: function () { valueMenu(d); } };
+        })), { label: "Filtrar por" });
+      });
+      vb.appendChild(filterBtn);
+
+      active.forEach(function (d) {
+        var cur = d.options.filter(function (o) { return o.value === boardF[d.key]; })[0];
+        var val = cur ? cur.label : boardF[d.key];
+        vb.appendChild(h("button", { type: "button", class: "fchip", "data-fk": "fchip-" + d.key, "aria-label": "Remover filtro " + d.name + ": " + val,
+          onclick: function () { boardF[d.key] = ""; PF.refresh(); focusFk("board-filtro"); } },
+          h("span", { class: "fk" }, d.name), h("span", {}, val), h("span", { class: "fx", "aria-hidden": "true" }, icon("x", 12))));
+      });
+      if (active.length > 1 || (active.length && boardF.q)) {
+        vb.appendChild(h("button", { class: "btn btn-ghost btn-sm", onclick: function () { clearBoardFilters(); PF.refresh(); focusFk("board-filtro"); } }, "Limpar tudo"));
+      }
+      vb.appendChild(h("span", { class: "grow" }));
+      var sortBtn = h("button", { class: "btn", "aria-haspopup": "menu", "aria-expanded": "false", "data-fk": "board-ordem", "aria-label": "Ordenar por " + SORT_LABEL[boardF.group] },
+        icon("backlog", 14), h("span", { class: "subtle" }, "Ordenar:"), SORT_LABEL[boardF.group], icon("chevD", 12));
+      sortBtn.addEventListener("click", function () {
+        PF.menu(sortBtn, [{ head: "Ordenar cards por" }].concat(["none", "priority", "due"].map(function (g) {
+          return { label: SORT_LABEL[g], checked: boardF.group === g, radio: true, onClick: function () { boardF.group = g; PF.refresh(); } };
+        })), { label: "Ordenar cards por" });
+      });
+      vb.appendChild(sortBtn);
+      page.appendChild(vb);
 
       var tasks = PF.projectTasks(p.id).filter(function (t) {
         if (t.parentId) return false;
@@ -535,7 +673,7 @@
         var hidden = PF.projectTasks(p.id).filter(function (t) { return !t.parentId; }).length;
         page.appendChild(PF.emptyState("filter", "Nenhuma tarefa corresponde aos filtros",
           hidden + (hidden === 1 ? " tarefa oculta" : " tarefas ocultas") + " pelos filtros atuais.",
-          h("button", { class: "btn", onclick: function () { boardF.q = boardF.assignee = boardF.priority = boardF.sprint = boardF.label = ""; PF.refresh(); } }, icon("x", 12), "Limpar filtros")));
+          h("button", { class: "btn", onclick: function () { clearBoardFilters(); PF.refresh(); } }, icon("x", 12), "Limpar filtros")));
         return;
       }
       var canMoveHere = PF.can("task.move");
@@ -547,8 +685,8 @@
         var head = h("div", { class: "col-head" },
           PF.statusIcon(status),
           h("b", {}, PF.STATUS_META[status].label),
-          h("span", { class: "cnt" }, String(colTasks.length)),
-          lateN ? h("span", { class: "chip danger", style: "font-size:10.5px" }, PF.plural(lateN, "atrasada", "atrasadas")) : null);
+          h("span", { class: "count" }, String(colTasks.length)),
+          lateN ? h("span", { class: "chip danger", role: "img", "aria-label": PF.plural(lateN, "tarefa atrasada", "tarefas atrasadas"), "data-tip": PF.plural(lateN, "atrasada", "atrasadas") }, icon("alert", 12), String(lateN)) : null);
         if (PF.can("task.create")) {
           head.appendChild(h("button", {
             class: "btn btn-ghost btn-icon btn-sm", "aria-label": "Criação rápida em " + PF.STATUS_META[status].label,
@@ -558,7 +696,8 @@
         col.appendChild(head);
         var bodyEl = h("div", { class: "col-body" });
         colTasks.forEach(function (t) { bodyEl.appendChild(kanbanCard(t)); });
-        if (!colTasks.length) bodyEl.appendChild(h("div", { class: "subtle", style: "text-align:center;padding:14px;font-size:11.5px;border:1px dashed var(--border);border-radius:6px" }, canMoveHere ? "Sem tarefas — arraste uma tarefa para cá" : "Sem tarefas"));
+        if (!colTasks.length) bodyEl.appendChild(h("div", { class: "col-empty" },
+          h("span", {}, "Sem tarefas"), canMoveHere ? h("span", {}, "Arraste uma tarefa para cá") : null));
         col.appendChild(bodyEl);
 
         // drag & drop
@@ -589,24 +728,26 @@
       class: "kcard", tabindex: "0", role: "button",
       "aria-label": t.ref + " — " + t.title + ". " + PF.STATUS_META[t.status].label + (canDrag ? ". Alt+seta esquerda ou direita move entre colunas" : ""),
       "aria-keyshortcuts": canDrag ? "Alt+ArrowLeft Alt+ArrowRight" : null,
+      "aria-current": PF._openTaskId === t.id ? "true" : null,
       "data-fk": "kcard-" + t.id,
       draggable: canDrag ? "true" : null
     });
     var subs = PF.db.tasks.filter(function (x) { return x.parentId === t.id; });
     card.appendChild(h("div", { class: "kc-top" },
-      PF.typeIcon(t.type, 13),
+      PF.typeIcon(t.type, 14),
       h("span", { class: "ref" }, t.ref),
       h("span", { class: "grow" }),
-      PF.prioChip(t.priority, true)));
-    card.appendChild(h("div", { class: "kc-title" }, t.title));
-    if (t.labels.length) card.appendChild(h("div", { style: "display:flex;gap:4px;flex-wrap:wrap;margin-bottom:7px" }, t.labels.map(PF.labelChip)));
-    var due = PF.daysLeft(t.dueDate);
-    card.appendChild(h("div", { class: "kc-foot" },
-      PF.isBlocked(t) ? h("span", { class: "blocked-flag" }, icon("block", 11), "Bloqueada") : null,
-      t.dueDate ? h("span", { class: "due" + (PF.isOverdue(t) ? " late" : "") }, icon("timer", 11), due < 0 ? (-due) + "d de atraso" : due === 0 ? "Hoje" : PF.fmtDate(t.dueDate)) : null,
-      subs.length ? h("span", { class: "due" }, icon("subtask", 11), subs.filter(function (s) { return s.status === "done"; }).length + "/" + subs.length) : null,
-      h("span", { class: "sp" }),
       PF.avatarEl(PF.user(t.assigneeId), "sm")));
+    card.appendChild(h("div", { class: "kc-title" }, t.title));
+    if (t.labels.length) card.appendChild(h("div", { class: "kc-labels" }, t.labels.map(function (l) { return PF.labelChip(l); })));
+    var due = PF.daysLeft(t.dueDate);
+    var late = PF.isOverdue(t);
+    card.appendChild(h("div", { class: "kc-foot" },
+      PF.prioChip(t.priority, true),
+      PF.isBlocked(t) ? h("span", { class: "blocked-flag" }, icon("block", 12), "Bloqueada") : null,
+      t.dueDate ? h("span", { class: "due" + (late ? " late" : t.status !== "done" && due != null && due <= 2 ? " soon" : "") }, icon("calendar", 12),
+        late ? (-due) + "d de atraso" : due === 0 ? "Hoje" : due === 1 ? "Amanhã" : PF.fmtDate(t.dueDate)) : null,
+      subs.length ? h("span", { class: "due", "aria-label": "Subtarefas concluídas: " + subs.filter(function (s) { return s.status === "done"; }).length + " de " + subs.length }, icon("subtask", 12), subs.filter(function (s) { return s.status === "done"; }).length + "/" + subs.length) : null));
 
     card.addEventListener("click", function () { PF.ui.openTask(t.id); });
     card.addEventListener("keydown", function (e) {
@@ -659,9 +800,8 @@
       var pick = projectPicker();
       if (!pick.project) { page.appendChild(PF.emptyState("backlog", "Nenhum projeto", "Crie um projeto para planejar o backlog.")); return; }
       page.appendChild(PF.ui.pageHead("Backlog", "Tarefas de " + pick.project.name + " ainda fora de sprint.", [
-        pick.el,
         PF.can("task.create") ? h("button", { class: "btn btn-primary", onclick: function () { PF.ui.taskModal({ projectId: pick.project.id, status: "backlog" }); } }, icon("plus", 14), "Nova tarefa") : null
-      ]));
+      ], pick.el));
       PF.ui.renderTaskTable(page, { projectId: pick.project.id, backlogMode: true, state: backlogState });
     }
   };
@@ -674,9 +814,8 @@
       if (!pick.project) { page.appendChild(PF.emptyState("sprint", "Nenhum projeto", "Crie um projeto para planejar sprints.")); return; }
       var p = pick.project;
       page.appendChild(PF.ui.pageHead("Sprints", "Planejamento e histórico de " + p.name + ".", [
-        pick.el,
         PF.can("sprint.manage") ? h("button", { class: "btn btn-primary", onclick: function () { sprintModal(p); } }, icon("plus", 14), "Nova sprint") : null
-      ]));
+      ], pick.el));
 
       var sprints = PF.sprintsOf(p.id);
       var order = { active: 0, planned: 1, done: 2 };
@@ -687,14 +826,16 @@
         return;
       }
 
+      var sprStack = h("div", { class: "stack" });
+      page.appendChild(sprStack);
       sprints.forEach(function (s) {
         var ts = PF.db.tasks.filter(function (t) { return t.sprintId === s.id && !t.parentId; });
         var done = ts.filter(function (t) { return t.status === "done"; }).length;
         var pct = ts.length ? Math.round(100 * done / ts.length) : 0;
-        var panel = h("div", { class: "panel", style: "margin-bottom:14px" });
-        var stChip = s.status === "active" ? h("span", { class: "chip accent" }, "Ativa")
-          : s.status === "planned" ? h("span", { class: "chip" }, "Planejada")
-          : h("span", { class: "chip ok" }, "Concluída");
+        var panel = h("div", { class: "panel sprint-panel" + (s.status === "active" ? " is-active" : "") });
+        var stChip = s.status === "active" ? h("span", { class: "chip accent" }, icon("play", 12), "Ativa")
+          : s.status === "planned" ? h("span", { class: "chip" }, icon("calendar", 12), "Planejada")
+          : h("span", { class: "chip ok" }, icon("check", 12), "Concluída");
         var headActions = [];
         if (PF.can("sprint.manage")) {
           if (s.status === "planned") headActions.push(h("button", { class: "btn btn-sm btn-primary", onclick: function () { PF.act.startSprint(s.id); } }, icon("play", 12), "Iniciar sprint"));
@@ -716,23 +857,24 @@
         }
         panel.appendChild(h("div", { class: "panel-head" },
           h("h3", {}, s.name), stChip,
-          h("span", { class: "muted", style: "font-size:12px" }, PF.fmtDate(s.startDate) + " → " + PF.fmtDate(s.endDate)),
+          h("span", { class: "subtle num" }, PF.fmtDate(s.startDate) + " → " + PF.fmtDate(s.endDate)),
           h("span", { class: "spacer" }), headActions));
-        var body = h("div", { class: "panel-body" });
-        if (s.goal) body.appendChild(h("p", { class: "muted", style: "font-size:12.5px" }, icon("flag", 12), " Meta: " + s.goal));
-        body.appendChild(h("div", { style: "display:flex;gap:10px;align-items:center;margin:8px 0" },
+        var body = h("div", { class: "panel-body sprint-sum" });
+        body.appendChild(h("div", { class: "sprint-goal" }, icon("flag", 14), s.goal ? h("span", {}, h("span", { class: "subtle" }, "Meta "), s.goal) : h("span", { class: "subtle" }, "Sem meta definida")));
+        body.appendChild(h("div", { class: "sprint-prog" },
           PF.progressBar(pct, pct === 100, "Progresso da " + s.name),
-          h("span", { class: "num muted", style: "font-size:12px" }, done + "/" + ts.length + " concluídas (" + pct + "%)")));
+          h("span", { class: "num" }, h("b", {}, done + "/" + ts.length), " concluídas · " + pct + "%")));
+        panel.appendChild(body);
         if (ts.length) {
-          var list = h("div");
+          var list = h("div", { class: "list sprint-list" });
           ts.sort(function (a, b) { return PF.STATUSES.indexOf(a.status) - PF.STATUSES.indexOf(b.status) || PF.cmp(a.ref, b.ref); }).slice(0, 8).forEach(function (t) {
             list.appendChild(PF.ui.taskRow(t));
           });
-          if (ts.length > 8) list.appendChild(h("p", { class: "subtle", style: "font-size:11.5px;padding:6px 14px" }, "+ " + PF.plural(ts.length - 8, "tarefa", "tarefas") + " — veja no Kanban filtrando por esta sprint."));
-          body.appendChild(list);
-        } else body.appendChild(h("p", { class: "subtle", style: "font-size:12px" }, "Nenhuma tarefa associada ainda."));
-        panel.appendChild(body);
-        page.appendChild(panel);
+          if (ts.length > 8) list.appendChild(h("a", { class: "list-item compact more-row", href: "#/board", onclick: function () { boardF.sprint = s.id; PF.act.setCurrentProject(p.id); } },
+            icon("board", 14), h("span", { class: "li-main" }, "Ver mais " + PF.plural(ts.length - 8, "tarefa", "tarefas") + " no Kanban"), h("span", { class: "chev" }, icon("chevR", 14))));
+          panel.appendChild(list);
+        } else panel.appendChild(h("div", { class: "panel-body sprint-empty" }, PF.emptyState("tasks", "Nenhuma tarefa nesta sprint", s.status === "done" ? "A sprint terminou sem tarefas associadas." : "Use “Adicionar do backlog” para planejar o ciclo.", null, { compact: true })));
+        sprStack.appendChild(panel);
       });
     }
   };
@@ -775,11 +917,11 @@
     render: function (page) {
       page.appendChild(PF.ui.pageHead("Cronograma", "Janelas dos projetos e marcos de entrega."));
       var fbar = h("div", { class: "fbar" });
-      fbar.appendChild(PF.select([
-        { value: "90", label: "Janela de 3 meses" }, { value: "180", label: "Janela de 6 meses" }, { value: "365", label: "Janela de 12 meses" }
-      ], String(tlF.span), function (v) { tlF.span = +v; PF.refresh(); }, { "aria-label": "Janela" }));
-      fbar.appendChild(PF.select([{ value: "", label: "Todas as equipes" }].concat(PF.scopeTeams().map(function (t) { return { value: t.id, label: t.name }; })),
-        tlF.teamId, function (v) { tlF.teamId = v; PF.refresh(); }, { "aria-label": "Equipe" }));
+      fbar.appendChild(PF.filterSelect("Janela", [
+        { value: "90", label: "3 meses" }, { value: "180", label: "6 meses" }, { value: "365", label: "12 meses" }
+      ], String(tlF.span), function (v) { tlF.span = +v; PF.refresh(); }, null, { def: "180" }));
+      fbar.appendChild(PF.filterSelect("Equipe", [{ value: "", label: "Todas" }].concat(PF.scopeTeams().map(function (t) { return { value: t.id, label: t.name }; })),
+        tlF.teamId, function (v) { tlF.teamId = v; PF.refresh(); }));
       page.appendChild(fbar);
 
       var DAY = 86400000;
@@ -801,10 +943,10 @@
       var grid = h("div", { class: "g-grid" });
 
       // cabeçalho de meses
-      var months = h("div", { class: "g-months" }, h("div", { style: "width:220px;flex:none;border-left:0" }, "Projeto"));
+      var months = h("div", { class: "g-months" }, h("div", { class: "g-months-cell" }, "Projeto"));
       var cur = new Date(from);
       cur.setDate(1);
-      var track = h("div", { style: "display:flex;flex:1" });
+      var track = h("div", { class: "g-track-head" });
       while (cur.getTime() < to) {
         var mStart = Math.max(cur.getTime(), from);
         var next = new Date(cur.getFullYear(), cur.getMonth() + 1, 1).getTime();
@@ -819,7 +961,7 @@
 
       projs.forEach(function (p) {
         var row = h("div", { class: "g-row" });
-        row.appendChild(h("div", { class: "g-label", title: p.name }, p.name));
+        row.appendChild(h("div", { class: "g-label", title: p.name }, PF.projectDot(p), h("span", { class: "truncate" }, p.name)));
         var tr = h("div", { class: "g-track" });
         var x1 = pos(p.startDate), x2 = pos(p.targetDate);
         var prog = PF.projectProgress(p.id);
@@ -827,7 +969,7 @@
         var cls = p.status === "done" ? "done" : late ? "late" : "";
         var bar = h("a", {
           class: "g-bar " + cls, href: "#/projects/" + p.id,
-          style: "left:" + x1 + "%;width:" + Math.max(3, x2 - x1) + "%;text-decoration:none",
+          style: "left:" + x1 + "%;width:" + Math.max(3, x2 - x1) + "%",
           "data-tip": p.name + " · " + prog + "%",
           "aria-label": p.name + ", " + prog + "% concluído, de " + PF.fmtDate(p.startDate) + " a " + PF.fmtDate(p.targetDate) + (late ? ", prazo estourado" : p.status === "done" ? ", concluído" : "")
         }, p.key + " · " + prog + "%");
@@ -851,11 +993,11 @@
       panel.appendChild(gantt);
       page.appendChild(panel);
       page.appendChild(h("div", { class: "legend" },
-        h("span", {}, h("i", { style: "background:var(--accent-soft);border:1px solid var(--accent)" }), "Em andamento"),
-        h("span", {}, h("i", { style: "background:var(--ok-soft);border:1px solid var(--ok)" }), "Concluído"),
-        h("span", {}, h("i", { style: "background:var(--danger-soft);border:1px solid var(--danger)" }), "Prazo estourado"),
-        h("span", {}, h("i", { style: "background:var(--violet);rotate:45deg;border-radius:2px" }), "Marco"),
-        h("span", {}, h("i", { style: "background:var(--danger)" }), "Hoje")));
+        h("span", {}, h("i", { class: "lg-bar accent" }), "Em andamento"),
+        h("span", {}, h("i", { class: "lg-bar ok" }), "Concluído"),
+        h("span", {}, h("i", { class: "lg-bar danger" }), "Prazo estourado"),
+        h("span", {}, h("i", { class: "lg-ms" }), "Marco"),
+        h("span", {}, h("i", { class: "lg-today" }), "Hoje")));
     }
   };
 })();
