@@ -12,7 +12,9 @@
   ];
 
   /* ============================ ASSISTENTE DE IA ============================ */
-  var chatLog = []; // sessão em memória
+  // sessão em memória, separada por perfil: cada resposta foi calculada com a visibilidade de quem perguntou
+  var chatLogs = {};
+  function myChat() { var id = PF.me().id; return chatLogs[id] || (chatLogs[id] = []); }
 
   PF.routes.assistant = {
     title: "Assistente de IA", app: "workspace", cap: "ai.use",
@@ -44,6 +46,7 @@
       page.appendChild(panel);
 
       function draw() {
+        var chatLog = myChat();
         log.replaceChildren();
         if (!chatLog.length) {
           log.appendChild(h("div", { class: "empty", style: "margin:auto" },
@@ -67,6 +70,7 @@
       draw();
 
       function send(text) {
+        var chatLog = myChat();
         input.value = "";
         chatLog.push({ role: "me", text: text });
         draw();
@@ -230,7 +234,7 @@
     foot.appendChild(target);
     var applyBtn = h("button", { class: "btn btn-primary btn-sm" }, icon("check", 13), "Adicionar selecionadas");
     applyBtn.addEventListener("click", function () {
-      if (!PF.can("ai.apply")) { PF.deny("aplicar propostas da IA"); return; }
+      if (!PF.can("ai.apply")) { PF.deny("aplicar propostas da IA", "ai"); return; }
       var projectId = target.value;
       var selected = checks.filter(function (c) { return c.cb.checked; });
       if (!selected.length) { PF.toast("Nada selecionado", "Marque ao menos um item.", "warn"); return; }
@@ -361,6 +365,7 @@
   };
 
   var testerState = { tool: "tasks_list", args: JSON.stringify(EXAMPLES.tasks_list, null, 2), result: null };
+  PF.profileHooks.push(function () { testerState.result = null; });
 
   function renderMcpTester(page) {
     var grid = h("div", { class: "grid c2" });
@@ -424,15 +429,24 @@
     var capNeeded = tool.kind === "write" ? "mcp.write" : "mcp.read";
     if (!PF.can(capNeeded)) {
       logRun(false, "Negado: perfil sem " + capNeeded);
-      PF.deny("executar ferramentas MCP de " + (tool.kind === "write" ? "escrita" : "leitura"));
+      PF.deny("executar ferramentas MCP de " + (tool.kind === "write" ? "escrita" : "leitura"), "mcp");
       return { ok: false, error: "permission_denied", detail: "O papel “" + PF.roleName(PF.me().roleId) + "” não possui a capacidade " + capNeeded + "." };
     }
+    // fora do escopo do perfil, projeto e tarefa respondem como inexistentes (sem vazar dados)
     function findProject(ref) {
       if (!ref) return null;
-      return PF.db.projects.find(function (p) { return p.key === String(ref).toUpperCase() || p.id === ref; }) || null;
+      var p = PF.db.projects.find(function (x) { return x.key === String(ref).toUpperCase() || x.id === ref; }) || null;
+      return p && PF.canSeeProject(p.id) ? p : null;
     }
     function findTask(ref) {
-      return PF.db.tasks.find(function (t) { return t.ref === String(ref).toUpperCase() || t.id === ref; }) || null;
+      if (ref == null) return null;
+      var t = PF.db.tasks.find(function (x) { return x.ref === String(ref).toUpperCase() || x.id === ref; }) || null;
+      return t && PF.canSeeProject(t.projectId) ? t : null;
+    }
+    function findMember(projectId, who) {
+      if (who == null || who === "") return null;
+      var key = String(who).toLowerCase();
+      return PF.projectMembers(projectId).find(function (u) { return u.name.toLowerCase() === key || u.id === who; }) || null;
     }
     function tjson(t) {
       return { ref: t.ref, title: t.title, type: t.type, status: t.status, priority: t.priority,
@@ -504,7 +518,11 @@
           if (!pc) { res = { ok: false, error: "not_found", detail: "Projeto não encontrado." }; logRun(false, "Projeto não encontrado"); break; }
           if (!args.title) { res = { ok: false, error: "invalid_args", detail: "title é obrigatório." }; logRun(false, "Argumentos inválidos"); break; }
           var assg = null;
-          if (args.assignee) { var au = PF.db.users.find(function (x) { return x.name.toLowerCase() === String(args.assignee).toLowerCase() || x.id === args.assignee; }); assg = au ? au.id : null; }
+          if (args.assignee) {
+            var au = findMember(pc.id, args.assignee);
+            if (!au) { res = { ok: false, error: "invalid_args", detail: "Responsável precisa ser membro ativo das equipes do projeto." }; logRun(false, "Responsável inválido"); break; }
+            assg = au.id;
+          }
           var nt = PF.act.createTask({ projectId: pc.id, title: args.title, type: args.type || "task", priority: args.priority || "medium", assigneeId: assg, silent: true }, "mcp");
           res = nt ? { ok: true, task: tjson(nt) } : { ok: false, error: "denied" };
           logRun(!!nt, nt ? "Tarefa " + nt.ref + " criada" : "Negado");
@@ -530,9 +548,9 @@
         }
         case "tasks_assign": {
           var ta = findTask(args.ref);
-          var uu = PF.db.users.find(function (x) { return x.name.toLowerCase() === String(args.assignee || "").toLowerCase() || x.id === args.assignee; });
           if (!ta) { res = { ok: false, error: "not_found", detail: "Tarefa não encontrada." }; logRun(false, "Tarefa não encontrada"); break; }
-          if (!uu) { res = { ok: false, error: "not_found", detail: "Usuário não encontrado — use o nome completo." }; logRun(false, "Usuário não encontrado"); break; }
+          var uu = findMember(ta.projectId, args.assignee);
+          if (!uu) { res = { ok: false, error: "invalid_args", detail: "Responsável não encontrado entre os membros das equipes do projeto — use o nome completo." }; logRun(false, "Responsável inválido"); break; }
           if (!PF.can("task.assign")) { res = { ok: false, error: "permission_denied", detail: "Papel sem task.assign." }; logRun(false, "Negado: task.assign"); break; }
           PF.act.updateTask(ta.id, { assigneeId: uu.id }, "mcp");
           res = { ok: true, task: tjson(PF.task(ta.id)) };
@@ -561,8 +579,8 @@
           break;
         }
         case "teams_list": {
-          var tms = PF.db.teams.map(function (t) {
-            return { name: t.name, org: (PF.byId("orgs", t.orgId) || {}).name, lead: t.leadId ? PF.user(t.leadId).name : null,
+          var tms = PF.scopeTeams().map(function (t) {
+            return { name: t.name, org: (PF.byId("orgs", t.orgId) || {}).name, lead: t.leadId && PF.user(t.leadId) ? PF.user(t.leadId).name : null,
               members: t.memberIds.map(function (m) { return PF.user(m) ? PF.user(m).name : m; }) };
           });
           res = { ok: true, count: tms.length, teams: tms };
@@ -618,19 +636,25 @@
           var body = h("div", { class: "panel-body" });
           body.appendChild(h("div", { class: "hist-item" }, icon("link", 14), h("span", { class: "mono grow", style: "font-size:12px" }, wh.url)));
           // segredo
-          var secretCode = h("code", { class: "code", style: "padding:4px 8px;display:inline-block" }, "whsec_••••••••••••••••");
-          var revealed = false;
-          var eyeBtn = h("button", { class: "btn btn-ghost btn-icon btn-sm", "aria-label": "Revelar segredo" }, icon("eye", 13));
-          eyeBtn.addEventListener("click", function () {
-            revealed = !revealed;
-            secretCode.textContent = revealed ? wh.secret : "whsec_••••••••••••••••";
-            eyeBtn.replaceChildren(icon(revealed ? "eyeOff" : "eye", 13));
-          });
-          body.appendChild(h("div", { class: "secret-box", style: "margin:8px 0" },
-            h("span", { class: "subtle", style: "font-size:11.5px" }, "Segredo de assinatura (HMAC):"), secretCode, eyeBtn,
-            h("button", { class: "btn btn-ghost btn-icon btn-sm", "aria-label": "Copiar segredo", onclick: function () {
-              try { navigator.clipboard.writeText(wh.secret); PF.toast("Segredo copiado", "", "ok"); } catch (e) { PF.toast("Não foi possível copiar", "", "warn"); }
-            } }, icon("copy", 13))));
+          var canSecret = PF.can("webhook.manage");
+          var masked = "whsec_••••••••••••" + (canSecret ? "••••" : wh.secret.slice(-4));
+          var secretCode = h("code", { class: "code", style: "padding:4px 8px;display:inline-block" }, masked);
+          var secretBox = h("div", { class: "secret-box", style: "margin:8px 0" },
+            h("span", { class: "subtle", style: "font-size:11.5px" }, "Segredo de assinatura (HMAC):"), secretCode);
+          if (canSecret) {
+            var revealed = false;
+            var eyeBtn = h("button", { class: "btn btn-ghost btn-icon btn-sm", "aria-label": "Revelar segredo de " + wh.name, "aria-pressed": "false" }, icon("eye", 13));
+            eyeBtn.addEventListener("click", function () {
+              revealed = !revealed;
+              secretCode.textContent = revealed ? wh.secret : masked;
+              eyeBtn.setAttribute("aria-pressed", revealed ? "true" : "false");
+              eyeBtn.replaceChildren(icon(revealed ? "eyeOff" : "eye", 13));
+            });
+            secretBox.append(eyeBtn, h("button", { class: "btn btn-ghost btn-icon btn-sm", "aria-label": "Copiar segredo de " + wh.name, onclick: function () {
+              PF.copyText(wh.secret, "Segredo copiado");
+            } }, icon("copy", 13)));
+          }
+          body.appendChild(secretBox);
           body.appendChild(h("div", {}, wh.events.map(function (ev) { return h("span", { class: "chip", style: "margin:0 4px 4px 0;font-family:var(--mono);font-size:10.5px" }, ev); })));
           if (fails) body.appendChild(h("p", { class: "subtle", style: "font-size:11.5px;margin-top:6px;color:var(--danger)" }, fails + " entrega(s) com falha — veja o histórico para reenviar."));
           panel.appendChild(body);
@@ -771,7 +795,7 @@
       var CH_LABEL = { email: "E-mail", whatsapp: "WhatsApp", sms: "SMS" };
 
       if (tab === "history") {
-        var mine = PF.db.notifications.filter(function (n) { return PF.can("user.manage") || PF.can("webhook.view") || n.toUserId === PF.me().id; });
+        var mine = PF.visibleNotifications();
         if (!mine.length) { page.appendChild(PF.emptyState("bell", "Nenhuma notificação", "Atribua tarefas ou inicie sprints para gerar notificações.")); return; }
         var tbl = h("table", { class: "tbl" },
           h("thead", {}, h("tr", {}, h("th", {}, "Canal"), h("th", {}, "Assunto"), h("th", {}, "Destinatário"), h("th", {}, "Status"), h("th", { class: "num" }, "Tentativas"), h("th", {}, "Quando"), h("th", { class: "actions-col" }))));
@@ -784,7 +808,7 @@
             h("td", {}, n.status === "delivered" ? h("span", { class: "deliv-status success" }, icon("check", 13), "entregue") : h("span", { class: "deliv-status failed" }, icon("alert", 13), "falhou")),
             h("td", { class: "num" }, String(n.attempts)),
             h("td", { class: "nowrap muted", style: "font-size:11.5px" }, PF.rel(n.ts)),
-            h("td", { class: "actions-col" }, n.status === "failed" ? h("button", {
+            h("td", { class: "actions-col" }, n.status === "failed" && PF.can("notif.manage") ? h("button", {
               class: "btn btn-sm", onclick: function (e) { e.stopPropagation(); PF.act.resendNotification(n.id); }
             }, icon("refresh", 12), "Reenviar") : null)));
         });
@@ -836,7 +860,7 @@
           card.appendChild(h("div", { class: "panel-body" },
             h("p", { class: "muted", style: "font-size:12px" }, pv.name),
             pv.configured ? h("div", { class: "mono subtle", style: "font-size:11.5px" }, "remetente: " + pv.from) : h("p", { class: "subtle", style: "font-size:12px" }, "Envios por este canal falham até a configuração."),
-            PF.can("webhook.manage") ? h("div", { style: "margin-top:10px" },
+            PF.can("notif.manage") ? h("div", { style: "margin-top:10px" },
               h("button", { class: "btn btn-sm", onclick: function () { providerModal(ch); } }, icon("settings", 12), "Configurar")) : null));
           grid2.appendChild(card);
         });
@@ -864,13 +888,14 @@
     body.appendChild(h("p", {}, n.subject));
     body.appendChild(h("div", { class: "section-h" }, "Mensagem"));
     body.appendChild(h("p", { style: "white-space:pre-wrap" }, n.body));
-    if (n.status === "failed") {
+    if (n.status === "failed" && PF.can("notif.manage")) {
       body.appendChild(h("div", { style: "margin-top:12px" },
         h("button", { class: "btn btn-primary btn-sm", onclick: function () { PF.act.resendNotification(n.id); PF.closeOverlays(); } }, icon("refresh", 13), "Reenviar notificação")));
     }
   }
 
   function providerModal(ch) {
+    if (!PF.guard("notif.manage", "configurar provedores de notificação")) return;
     var pv = PF.db.providers[ch];
     var from = h("input", { class: "input", value: pv.from, placeholder: ch === "email" ? "noreply@empresa.dev" : "+55 11 90000-0000" });
     var host = h("input", { class: "input mono", value: pv.host, placeholder: ch === "email" ? "smtp.empresa.dev" : "api.gateway.exemplo" });

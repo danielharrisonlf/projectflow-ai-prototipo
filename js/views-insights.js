@@ -107,11 +107,14 @@
 
   function insFilterBar(extra) {
     var fbar = h("div", { class: "fbar" });
-    fbar.appendChild(PF.select([{ value: "", label: "Todas as organizações" }].concat(PF.db.orgs.map(function (o) { return { value: o.id, label: o.name }; })),
-      insF.orgId, function (v) { insF.orgId = v; insF.projectId = ""; PF.refresh(); }, { "aria-label": "Organização" }));
+    // só o administrador enxerga mais de uma organização
+    if (PF.me().roleId === "admin") {
+      fbar.appendChild(PF.select([{ value: "", label: "Todas as organizações" }].concat(PF.db.orgs.map(function (o) { return { value: o.id, label: o.name }; })),
+        insF.orgId, function (v) { insF.orgId = v; insF.projectId = ""; PF.refresh(); }, { "aria-label": "Organização" }));
+    } else insF.orgId = "";
     fbar.appendChild(PF.select([{ value: "", label: "Todos os projetos" }].concat(scopeProjects(true).map(function (p) { return { value: p.id, label: p.name }; })),
       insF.projectId, function (v) { insF.projectId = v; PF.refresh(); }, { "aria-label": "Projeto" }));
-    fbar.appendChild(PF.select([{ value: "", label: "Todas as equipes" }].concat(PF.db.teams.map(function (t) { return { value: t.id, label: t.name }; })),
+    fbar.appendChild(PF.select([{ value: "", label: "Todas as equipes" }].concat(PF.scopeTeams().map(function (t) { return { value: t.id, label: t.name }; })),
       insF.teamId, function (v) { insF.teamId = v; PF.refresh(); }, { "aria-label": "Equipe" }));
     fbar.appendChild(PF.select([
       { value: "30", label: "Últimos 30 dias" }, { value: "60", label: "Últimos 60 dias" },
@@ -221,7 +224,7 @@
       var p4 = h("div", { class: "panel" },
         h("div", { class: "panel-head" }, h("h3", {}, "Prazos por equipe"), h("span", { class: "spacer" }), h("span", { class: "subtle", style: "font-size:11.5px" }, "% de entregas no prazo")));
       var teamItems = [];
-      PF.db.teams.forEach(function (tm) {
+      PF.scopeTeams().forEach(function (tm) {
         var tts = tasks.filter(function (t) { return t.teamId === tm.id; });
         var r = onTimeRate(tts);
         if (r != null) teamItems.push({ label: tm.name, value: r, display: r + "%" });
@@ -238,7 +241,7 @@
       var tbl = h("table", { class: "tbl" },
         h("thead", {}, h("tr", {}, h("th", {}, "Equipe"), h("th", { class: "num" }, "Abertas"), h("th", { class: "num" }, "Concluídas"), h("th", { class: "num" }, "Atrasadas"), h("th", { class: "num" }, "No prazo"))));
       var tb = h("tbody");
-      PF.db.teams.forEach(function (tm) {
+      PF.scopeTeams().forEach(function (tm) {
         var tts = tasks.filter(function (t) { return t.teamId === tm.id; });
         if (!tts.length) return;
         var open = tts.filter(function (t) { return t.status !== "done"; }).length;
@@ -261,7 +264,7 @@
         PF.can("audit.view") ? h("button", { class: "btn btn-ghost btn-sm", onclick: function () { PF.navigate("/insights/audit"); } }, "Auditoria", icon("arrowR", 12)) : null));
       var paB = h("div", { class: "panel-body" });
       var ids = {}; projects.forEach(function (p) { ids[p.id] = 1; });
-      PF.db.audit.filter(function (a) { return a.action !== "denied" && (!a.projectId || ids[a.projectId]); }).slice(0, 7).forEach(function (a) {
+      PF.db.audit.filter(function (a) { return a.action !== "denied" && (a.projectId ? ids[a.projectId] : PF.canSeeAudit(a)); }).slice(0, 7).forEach(function (a) {
         var u = PF.user(a.userId);
         paB.appendChild(h("div", { class: "hist-item" },
           PF.avatarEl(u, "sm"), h("span", { class: "grow" }, h("b", {}, u ? u.name : "?"), " " + a.summary), h("time", {}, PF.rel(a.ts))));
@@ -339,7 +342,7 @@
       var pt = h("div", { class: "panel" });
       pt.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Progresso por equipe"), h("span", { class: "spacer" }), h("span", { class: "subtle", style: "font-size:11.5px" }, "% de tarefas concluídas")));
       var teamItems = [];
-      PF.db.teams.forEach(function (tm) {
+      PF.scopeTeams().forEach(function (tm) {
         var ts = tasks.filter(function (t) { return t.teamId === tm.id; });
         if (!ts.length) return;
         var pct = Math.round(100 * ts.filter(function (t) { return t.status === "done"; }).length / ts.length);
@@ -405,7 +408,7 @@
     create: "Criação", update: "Atualização", status: "Mudança de status", priority: "Mudança de prioridade",
     assign: "Atribuição", comment: "Comentário", block: "Bloqueio", archive: "Arquivamento", "delete": "Exclusão",
     sprint_start: "Início de sprint", sprint_end: "Encerramento de sprint", test: "Teste de webhook",
-    redeliver: "Reenvio de webhook", denied: "Permissão negada", ai_query: "Consulta à IA"
+    redeliver: "Reenvio de webhook", resend: "Reenvio de notificação", denied: "Permissão negada", ai_query: "Consulta à IA"
   };
   var ENTITY_LABELS = { task: "Tarefa", project: "Projeto", sprint: "Sprint", epic: "Épico", team: "Equipe", user: "Usuário", webhook: "Webhook", notification: "Notificação", mcp: "Agente MCP", permission: "Permissão", ai: "IA" };
 
@@ -416,9 +419,9 @@
         "Trilha completa das ações: quem fez, o quê, em qual entidade, com valores anteriores e novos, e a origem (interface, automação, API ou agente MCP)."));
 
       var fbar = h("div", { class: "fbar" });
-      fbar.appendChild(PF.select([{ value: "", label: "Todos os usuários" }].concat(PF.db.users.map(function (u) { return { value: u.id, label: u.name }; })),
+      fbar.appendChild(PF.select([{ value: "", label: "Todos os usuários" }].concat(PF.scopeUsers().map(function (u) { return { value: u.id, label: u.name }; })),
         audF.userId, function (v) { audF.userId = v; audF.page = 0; PF.refresh(); }, { "aria-label": "Usuário" }));
-      fbar.appendChild(PF.select([{ value: "", label: "Todos os projetos" }].concat(PF.db.projects.map(function (p) { return { value: p.id, label: p.name }; })),
+      fbar.appendChild(PF.select([{ value: "", label: "Todos os projetos" }].concat(PF.db.projects.filter(function (p) { return PF.inMyOrg(p.orgId); }).map(function (p) { return { value: p.id, label: p.name + (p.archived ? " (arquivado)" : "") }; })),
         audF.projectId, function (v) { audF.projectId = v; audF.page = 0; PF.refresh(); }, { "aria-label": "Projeto" }));
       fbar.appendChild(PF.select([{ value: "", label: "Todas as ações" }].concat(Object.keys(ACTION_LABELS).map(function (a) { return { value: a, label: ACTION_LABELS[a] }; })),
         audF.action, function (v) { audF.action = v; audF.page = 0; PF.refresh(); }, { "aria-label": "Ação" }));
@@ -435,6 +438,7 @@
 
       var cutoff = Date.now() - audF.period * 86400000;
       var rows = PF.db.audit.filter(function (a) {
+        if (!PF.canSeeAudit(a)) return false;
         if (new Date(a.ts).getTime() < cutoff) return false;
         if (audF.userId && a.userId !== audF.userId) return false;
         if (audF.projectId && a.projectId !== audF.projectId) return false;

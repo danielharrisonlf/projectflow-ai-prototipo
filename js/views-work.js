@@ -41,10 +41,8 @@
       });
     }
     function syncDependent() {
-      var p = PF.project(projectId);
-      var memberIds = {};
-      p.teamIds.forEach(function (tid) { var tm = PF.team(tid); if (tm) tm.memberIds.forEach(function (m) { memberIds[m] = 1; }); });
-      var members = PF.db.users.filter(function (u) { return memberIds[u.id] && !u.invited; });
+      var me = PF.me();
+      var members = PF.projectMembers(projectId).filter(function (u) { return PF.can("task.assign") || u.id === me.id; });
       fillSelect(f.assignee, [{ value: "", label: "Sem responsável" }].concat(members.map(function (u) { return { value: u.id, label: u.name }; })), defaults.assigneeId || "");
       fillSelect(f.epic, [{ value: "", label: "Sem épico" }].concat(PF.epicsOf(projectId).map(function (e) { return { value: e.id, label: e.name }; })), defaults.epicId || "");
       fillSelect(f.sprint, [{ value: "", label: "Sem sprint (backlog)" }].concat(PF.sprintsOf(projectId).filter(function (s) { return s.status !== "done"; }).map(function (s) { return { value: s.id, label: s.name + (s.status === "active" ? " (ativa)" : "") }; })), defaults.sprintId || "");
@@ -138,10 +136,11 @@
       prop("Prioridade", canEdit ? PF.select(PF.PRIORITIES.map(function (pr) { return { value: pr, label: PF.PRIO_META[pr].label }; }), t.priority,
         function (v) { PF.act.updateTask(t.id, { priority: v }); }) : PF.prioChip(t.priority));
 
-      var memberIds = {};
-      p.teamIds.forEach(function (tid) { var tm = PF.team(tid); if (tm) tm.memberIds.forEach(function (m) { memberIds[m] = 1; }); });
-      var members = PF.db.users.filter(function (u) { return memberIds[u.id] && !u.invited; });
-      var canAssign = canEdit && (PF.can("task.assign") || !t.assigneeId);
+      var me = PF.me();
+      var members = PF.projectMembers(p.id).filter(function (u) { return PF.can("task.assign") || u.id === me.id; });
+      // o responsável atual sempre aparece (mesmo que tenha saído da equipe)
+      if (t.assigneeId && !members.some(function (u) { return u.id === t.assigneeId; }) && PF.user(t.assigneeId)) members.push(PF.user(t.assigneeId));
+      var canAssign = canEdit && (PF.can("task.assign") || !t.assigneeId || t.assigneeId === me.id);
       prop("Responsável", canAssign ? PF.select([{ value: "", label: "Sem responsável" }].concat(members.map(function (u) { return { value: u.id, label: u.name }; })), t.assigneeId || "",
         function (v) { PF.act.updateTask(t.id, { assigneeId: v || null }); }) : PF.whoCell(t.assigneeId));
 
@@ -290,12 +289,14 @@
     btn.addEventListener("click", function () {
       var t = PF.task(taskId);
       var items = [];
-      PF.STATUSES.forEach(function (s) {
-        if (s !== t.status) items.push({ label: "Mover para " + PF.STATUS_META[s].label, onClick: function () { PF.act.moveTask(taskId, s); } });
-      });
-      items.push("sep");
+      if (PF.canTouchTask(t) && PF.can("task.move")) {
+        PF.STATUSES.forEach(function (s) {
+          if (s !== t.status) items.push({ label: "Mover para " + PF.STATUS_META[s].label, onClick: function () { PF.act.moveTask(taskId, s); } });
+        });
+        items.push("sep");
+      }
       items.push({ icon: "copy", label: "Copiar referência (" + t.ref + ")", onClick: function () {
-        try { navigator.clipboard.writeText(t.ref); PF.toast("Copiado", t.ref, "ok"); } catch (e) { PF.toast("Não foi possível copiar", "", "warn"); }
+        PF.copyText(t.ref, "Referência " + t.ref + " copiada");
       } });
       if (PF.can("task.delete")) items.push({ icon: "trash", label: "Excluir tarefa…", danger: true, onClick: function () {
         PF.confirm({ title: "Excluir tarefa", msg: "Remove " + t.ref + " e suas subtarefas (simulação). Não pode ser desfeito.", confirmLabel: "Excluir", danger: true })
@@ -323,7 +324,7 @@
     fbar.append(selStatus, selPrio);
     var selWho = null;
     if (!opts.assigneeId) {
-      selWho = PF.select([{ value: "", label: "Todos os responsáveis" }].concat(PF.db.users.filter(function (u) { return !u.invited; }).map(function (u) { return { value: u.id, label: u.name }; })), st.assignee, function (v) { st.assignee = v; st.page = 0; draw(); }, { "aria-label": "Responsável" });
+      selWho = PF.select([{ value: "", label: "Todos os responsáveis" }].concat(PF.scopeUsers().filter(function (u) { return !u.invited; }).map(function (u) { return { value: u.id, label: u.name }; })), st.assignee, function (v) { st.assignee = v; st.page = 0; draw(); }, { "aria-label": "Responsável" });
       fbar.appendChild(selWho);
     }
     var clearBtn = h("button", { class: "btn btn-ghost btn-sm", onclick: function () {
@@ -720,7 +721,7 @@
       fbar.appendChild(PF.select([
         { value: "90", label: "Janela de 3 meses" }, { value: "180", label: "Janela de 6 meses" }, { value: "365", label: "Janela de 12 meses" }
       ], String(tlF.span), function (v) { tlF.span = +v; PF.refresh(); }, { "aria-label": "Janela" }));
-      fbar.appendChild(PF.select([{ value: "", label: "Todas as equipes" }].concat(PF.db.teams.map(function (t) { return { value: t.id, label: t.name }; })),
+      fbar.appendChild(PF.select([{ value: "", label: "Todas as equipes" }].concat(PF.scopeTeams().map(function (t) { return { value: t.id, label: t.name }; })),
         tlF.teamId, function (v) { tlF.teamId = v; PF.refresh(); }, { "aria-label": "Equipe" }));
       page.appendChild(fbar);
 

@@ -30,6 +30,7 @@
     }, 120);
   };
   PF.resetDemo = function () {
+    clearTimeout(saveT);
     try { localStorage.removeItem(LS_KEY); } catch (e) {}
     PF.db = PFSeed.build();
     PF.save();
@@ -288,11 +289,14 @@
   };
   PF.roleName = function (roleId) { var r = PF.byId("roles", roleId); return r ? r.name : roleId; };
 
-  PF.visibleProjects = function () {
+  // escopo: admin vê todas as organizações; gestor e auditor, a própria organização;
+  // líder e dev, só os projetos das próprias equipes. Arquivados só sob pedido.
+  PF.visibleProjects = function (opts) {
     var me = PF.me();
-    var list = PF.db.projects.filter(function (p) { return !p.archived; });
-    if (me.roleId === "admin" || me.roleId === "viewer") return list;
-    if (me.roleId === "pm") return list.filter(function (p) { return p.orgId === me.orgId; });
+    var withArchived = !!(opts && opts.includeArchived);
+    var list = PF.db.projects.filter(function (p) { return withArchived || !p.archived; });
+    if (me.roleId === "admin") return list;
+    if (me.roleId === "pm" || me.roleId === "viewer") return list.filter(function (p) { return p.orgId === me.orgId; });
     return list.filter(function (p) {
       if (p.orgId !== me.orgId) return false;
       if (p.leadId === me.id) return true;
@@ -302,29 +306,67 @@
   PF.canSeeProject = function (projectId) {
     return PF.visibleProjects().some(function (p) { return p.id === projectId; });
   };
+  // organização no escopo do perfil atual (admin enxerga todas)
+  PF.inMyOrg = function (orgId) {
+    var me = PF.me();
+    return me.roleId === "admin" || orgId === me.orgId;
+  };
+  PF.scopeTeams = function () { return PF.db.teams.filter(function (t) { return PF.inMyOrg(t.orgId); }); };
+  PF.scopeUsers = function () { return PF.db.users.filter(function (u) { return PF.inMyOrg(u.orgId); }); };
+  // pessoas que podem ser responsáveis por tarefas do projeto (membros ativos das equipes do projeto)
+  PF.projectMembers = function (projectId) {
+    var p = PF.project(projectId);
+    if (!p) return [];
+    var ids = {};
+    p.teamIds.forEach(function (tid) { var tm = PF.team(tid); if (tm) tm.memberIds.forEach(function (m) { ids[m] = 1; }); });
+    return PF.db.users.filter(function (u) { return ids[u.id] && !u.invited && u.orgId === p.orgId; });
+  };
+  // registro de auditoria visível: admin vê tudo; os demais, só a própria organização
+  PF.canSeeAudit = function (a) {
+    var me = PF.me();
+    if (me.roleId === "admin") return true;
+    var p = a.projectId ? PF.project(a.projectId) : null;
+    if (p) return p.orgId === me.orgId;
+    var actor = PF.user(a.userId);
+    return !!actor && actor.orgId === me.orgId;
+  };
+  // notificações: quem administra usuários ou audita vê as da organização; os demais, só as próprias
+  PF.visibleNotifications = function () {
+    var me = PF.me();
+    var all = PF.can("user.manage") || PF.can("audit.view");
+    return PF.db.notifications.filter(function (n) {
+      if (n.toUserId === me.id) return true;
+      if (!all) return false;
+      var u = PF.user(n.toUserId);
+      return !!u && PF.inMyOrg(u.orgId);
+    });
+  };
   PF.canTouchTask = function (t) {
     var me = PF.me();
     if (!PF.can("task.edit")) return false;
-    if (me.roleId === "admin" || me.roleId === "pm") return true;
+    // escopo antes do papel: gestor e admin também não alteram tarefas fora do que enxergam
     if (!PF.canSeeProject(t.projectId)) return false;
+    if (me.roleId === "admin" || me.roleId === "pm") return true;
     if (me.roleId === "lead") return me.teamIds.indexOf(t.teamId) >= 0 || t.assigneeId === me.id;
     return t.assigneeId === me.id || t.createdBy === me.id || !t.assigneeId;
   };
-  PF.deny = function (what) {
+  // source: origem da tentativa (ui, mcp, ai…) — o filtro de origem da auditoria depende dela
+  PF.deny = function (what, source) {
     var me = PF.me();
     PF.db.audit.unshift({
       id: PF.uid("au"), ts: new Date().toISOString(), userId: me.id,
       action: "denied", entityType: "permission", entityId: null, projectId: null,
-      before: null, after: null, summary: "tentativa sem permissão: " + what, source: "ui"
+      before: null, after: null, summary: "tentativa sem permissão: " + what, source: source || "ui"
     });
     PF.save();
     PF.toast("Sem permissão", "O perfil “" + PF.roleName(me.roleId) + "” não pode " + what + ".", "err");
   };
-  PF.guard = function (cap, what) {
+  PF.guard = function (cap, what, source) {
     if (PF.can(cap)) return true;
-    PF.deny(what);
+    PF.deny(what, source);
     return false;
   };
+  PF.roleCaps = function (roleId) { return (ROLE_CAPS[roleId] || []).slice(); };
 
   /* ---------- auditoria, eventos, webhooks, notificações ---------- */
   function audit(action, entityType, entityId, projectId, before, after, summary, source) {
@@ -403,15 +445,25 @@
   /* ---------- ações (mutações centralizadas) ---------- */
   var act = PF.act = {};
 
+  // módulos registram aqui o que precisa ser limpo ao trocar de perfil (chat da IA, console MCP, filtros)
+  PF.profileHooks = [];
   act.setProfile = function (userId) {
     var u = PF.user(userId);
+    if (!u) return;
     PF.db.settings.currentUserId = userId;
+    PF.profileHooks.forEach(function (fn) { fn(u); });
     PF.save();
     PF.toast("Perfil alterado", "Agora você está navegando como " + u.name + " (" + PF.roleName(u.roleId) + ").", "info");
     // se a rota atual não é permitida para o novo perfil, volta ao início
     var route = PF.currentRoute();
     if (route && route.cap && !PF.can(route.cap)) PF.navigate(PF.db.settings.activeApp === "insights" ? "/insights" : "/dashboard");
     else PF.refresh();
+  };
+
+  // ação de interface: apagar todo o estado exige o perfil administrador
+  act.resetDemo = function () {
+    if (!PF.guard("user.manage", "restaurar os dados da demonstração")) return;
+    PF.resetDemo();
   };
 
   act.setTheme = function (mode) {
@@ -451,8 +503,9 @@
   };
 
   act.updateProject = function (id, fields, source) {
-    if (!PF.guard("project.edit", "editar projetos")) return;
+    if (!PF.guard("project.edit", "editar projetos", source)) return;
     var p = PF.project(id);
+    if (!p || !PF.canSeeProject(id)) { PF.deny("editar este projeto", source); return; }
     var before = {}, after = {};
     Object.keys(fields).forEach(function (k) {
       if (JSON.stringify(p[k]) !== JSON.stringify(fields[k])) { before[k] = p[k]; after[k] = fields[k]; p[k] = fields[k]; }
@@ -467,6 +520,7 @@
   act.archiveProject = function (id) {
     if (!PF.guard("project.archive", "arquivar projetos")) return;
     var p = PF.project(id);
+    if (!p || !PF.canSeeProject(id)) { PF.deny("arquivar este projeto"); return; }
     p.archived = true;
     audit("archive", "project", p.id, p.id, { archived: false }, { archived: true }, "arquivou o projeto " + p.name, "ui");
     PF.save(); PF.refresh();
@@ -476,6 +530,7 @@
   act.deleteProject = function (id) {
     if (!PF.guard("project.delete", "excluir projetos")) return;
     var p = PF.project(id);
+    if (!p || !PF.visibleProjects({ includeArchived: true }).some(function (x) { return x.id === id; })) { PF.deny("excluir este projeto"); return; }
     PF.db.projects = PF.db.projects.filter(function (x) { return x.id !== id; });
     PF.db.tasks = PF.db.tasks.filter(function (t) { return t.projectId !== id; });
     audit("delete", "project", id, id, { name: p.name }, null, "excluiu o projeto " + p.name + " (simulado)", "ui");
@@ -484,14 +539,24 @@
     PF.toast("Projeto excluído", p.name + " e suas tarefas foram removidos (simulação).", "ok");
   };
 
+  PF.isFavorite = function (projectId) {
+    var me = PF.me();
+    return (me.favoriteProjectIds || []).indexOf(projectId) >= 0;
+  };
   act.toggleFavorite = function (id) {
-    var p = PF.project(id);
-    p.favorite = !p.favorite;
+    var me = PF.me();
+    if (!PF.canSeeProject(id)) return;
+    var favs = (me.favoriteProjectIds || []).slice();
+    var i = favs.indexOf(id);
+    if (i >= 0) favs.splice(i, 1); else favs.push(id);
+    me.favoriteProjectIds = favs;
     PF.save(); PF.refresh();
+    PF.announce(i >= 0 ? "Removido dos favoritos" : "Adicionado aos favoritos");
   };
 
   act.createEpic = function (projectId, f, source) {
-    if (!PF.guard("task.create", "criar épicos")) return null;
+    if (!PF.guard("task.create", "criar épicos", source)) return null;
+    if (!PF.project(projectId) || !PF.canSeeProject(projectId)) { PF.deny("criar épicos neste projeto", source); return null; }
     var ep = { id: PF.uid("ep"), projectId: projectId, name: f.name, desc: f.desc || "", status: "active", ownerId: f.ownerId || PF.me().id };
     PF.db.epics.push(ep);
     audit("create", "epic", ep.id, projectId, null, { name: ep.name }, "criou o épico " + ep.name, source || "ui");
@@ -499,9 +564,18 @@
     return ep;
   };
 
+  // sem task.assign só é permitido atribuir a si mesmo (ou tirar a própria atribuição)
+  function assignAllowed(fromId, toId) {
+    if (PF.can("task.assign")) return true;
+    var me = PF.me().id;
+    return toId ? toId === me : (!fromId || fromId === me);
+  }
+  PF.assignAllowed = assignAllowed;
+
   act.createTask = function (f, source) {
-    if (!PF.guard("task.create", "criar tarefas")) return null;
-    if (!PF.canSeeProject(f.projectId)) { PF.deny("criar tarefas neste projeto"); return null; }
+    if (!PF.guard("task.create", "criar tarefas", source)) return null;
+    if (!PF.canSeeProject(f.projectId)) { PF.deny("criar tarefas neste projeto", source); return null; }
+    if (f.assigneeId && !assignAllowed(null, f.assigneeId)) { PF.deny("atribuir tarefas a outras pessoas", source); return null; }
     var p = PF.project(f.projectId);
     PF.db.taskCounters[p.id] = (PF.db.taskCounters[p.id] || 0) + 1;
     var t = {
@@ -529,7 +603,10 @@
   act.updateTask = function (id, fields, source) {
     var t = PF.task(id);
     if (!t) return;
-    if (!PF.canTouchTask(t)) { PF.deny("editar a tarefa " + t.ref); return; }
+    if (!PF.canTouchTask(t)) { PF.deny("editar a tarefa " + t.ref, source); return; }
+    if ("assigneeId" in fields && (fields.assigneeId || null) !== (t.assigneeId || null) && !assignAllowed(t.assigneeId, fields.assigneeId)) {
+      PF.deny("atribuir tarefas a outras pessoas", source); return;
+    }
     var p = PF.project(t.projectId);
     var before = {}, after = {};
     Object.keys(fields).forEach(function (k) {
@@ -568,12 +645,15 @@
   };
 
   act.moveTask = function (id, status, source) {
+    if (!PF.guard("task.move", "mover tarefas", source)) return;
     act.updateTask(id, { status: status }, source);
   };
 
-  act.deleteTask = function (id) {
+  act.deleteTask = function (id, source) {
     var t = PF.task(id);
-    if (!PF.guard("task.delete", "excluir tarefas")) return;
+    if (!t) return;
+    if (!PF.guard("task.delete", "excluir tarefas", source)) return;
+    if (!PF.canSeeProject(t.projectId)) { PF.deny("excluir a tarefa " + t.ref, source); return; }
     PF.db.tasks = PF.db.tasks.filter(function (x) { return x.id !== id && x.parentId !== id; });
     audit("delete", "task", id, t.projectId, { title: t.title }, null, "excluiu a tarefa " + t.ref + " (simulado)", "ui");
     PF.save(); PF.refresh();
@@ -597,6 +677,7 @@
 
   act.createSprint = function (projectId, f) {
     if (!PF.guard("sprint.manage", "criar sprints")) return null;
+    if (!PF.canSeeProject(projectId)) { PF.deny("criar sprints neste projeto"); return null; }
     var s = { id: PF.uid("sp"), projectId: projectId, name: f.name, goal: f.goal || "", status: "planned", startDate: f.startDate, endDate: f.endDate };
     PF.db.sprints.push(s);
     audit("create", "sprint", s.id, projectId, null, { name: s.name }, "criou a " + s.name, "ui");
@@ -608,6 +689,7 @@
   act.startSprint = function (id) {
     if (!PF.guard("sprint.manage", "iniciar sprints")) return;
     var s = PF.byId("sprints", id);
+    if (!s || !PF.canSeeProject(s.projectId)) { PF.deny("iniciar esta sprint"); return; }
     s.status = "active";
     audit("sprint_start", "sprint", s.id, s.projectId, { status: "planned" }, { status: "active" }, "iniciou a " + s.name, "ui");
     PF.emitEvent("sprint.started.v1", s.projectId, s.id, { sprint: s.name, vars: { sprint: s.name, projeto: PF.project(s.projectId).name, meta: s.goal } });
@@ -618,6 +700,7 @@
   act.completeSprint = function (id) {
     if (!PF.guard("sprint.manage", "encerrar sprints")) return;
     var s = PF.byId("sprints", id);
+    if (!s || !PF.canSeeProject(s.projectId)) { PF.deny("encerrar esta sprint"); return; }
     s.status = "done";
     var done = PF.db.tasks.filter(function (t) { return t.sprintId === id && t.status === "done"; }).length;
     var open = PF.db.tasks.filter(function (t) { return t.sprintId === id && t.status !== "done"; });
@@ -688,10 +771,16 @@
   };
 
   act.resendNotification = function (id) {
+    if (!PF.guard("notif.manage", "reenviar notificações")) return;
     var nf = PF.byId("notifications", id);
+    if (!nf) return;
     nf.attempts += 1;
     var provider = PF.db.providers[nf.channel];
-    if (provider.configured) { nf.status = "delivered"; nf.failReason = null; PF.toast("Notificação reenviada", "Entregue via " + nf.channel + ".", "ok"); }
+    var ok = !!(provider && provider.configured);
+    if (ok) { nf.status = "delivered"; nf.failReason = null; }
+    audit("resend", "notification", nf.id, null, null, { channel: nf.channel, status: nf.status },
+      "reenviou a notificação “" + nf.subject + "” (" + nf.channel + ")" + (ok ? "" : " — falhou"), "ui");
+    if (ok) PF.toast("Notificação reenviada", "Entregue via " + nf.channel + ".", "ok");
     else PF.toast("Reenvio falhou", "Provedor de " + nf.channel.toUpperCase() + " segue não configurado.", "err");
     PF.save(); PF.refresh();
   };
@@ -704,7 +793,7 @@
   };
 
   act.setProvider = function (channel, fields) {
-    if (!PF.guard("webhook.manage", "configurar provedores")) return;
+    if (!PF.guard("notif.manage", "configurar provedores de notificação")) return;
     Object.assign(PF.db.providers[channel], fields);
     audit("update", "notification", channel, null, null, fields, "configurou o provedor de " + channel, "ui");
     PF.save(); PF.refresh();
@@ -713,8 +802,13 @@
 
   act.createTeam = function (f) {
     if (!PF.guard("user.manage", "criar equipes")) return;
-    var t = { id: PF.uid("tm"), orgId: PF.me().orgId, name: f.name, desc: f.desc || "", leadId: f.leadId || null, memberIds: f.leadId ? [f.leadId] : [] };
+    var orgId = PF.me().orgId;
+    var lead = f.leadId ? PF.user(f.leadId) : null;
+    if (f.leadId && (!lead || lead.orgId !== orgId)) { PF.toast("Líder inválido", "O líder precisa ser da mesma organização da equipe.", "err"); return; }
+    var t = { id: PF.uid("tm"), orgId: orgId, name: f.name, desc: f.desc || "", leadId: lead ? lead.id : null, memberIds: lead ? [lead.id] : [] };
     PF.db.teams.push(t);
+    // os dois lados da relação ficam sincronizados (o escopo de projetos usa user.teamIds)
+    if (lead && lead.teamIds.indexOf(t.id) < 0) lead.teamIds.push(t.id);
     audit("create", "team", t.id, null, null, { name: t.name }, "criou a equipe " + t.name, "ui");
     PF.save(); PF.refresh();
     PF.toast("Equipe criada", t.name, "ok");
@@ -726,6 +820,7 @@
     var allowed = PF.can("user.manage") || (PF.can("team.manage") && team.leadId === me.id);
     if (!allowed) { PF.deny("gerenciar integrantes da equipe " + team.name); return; }
     var u = PF.user(userId);
+    if (!u || u.orgId !== team.orgId) { PF.toast("Pessoa de outra organização", "Só é possível incluir pessoas da organização da equipe.", "err"); return; }
     var idx = team.memberIds.indexOf(userId);
     if (idx >= 0) {
       team.memberIds.splice(idx, 1);
@@ -742,13 +837,15 @@
   act.inviteUser = function (f) {
     if (!PF.guard("user.manage", "convidar usuários")) return;
     var parts = f.name.trim().split(" ");
+    var orgId = PF.me().orgId;
+    var teamIds = (f.teamIds || []).filter(function (tid) { var tm = PF.team(tid); return tm && tm.orgId === orgId; });
     var u = {
       id: PF.uid("u"), name: f.name, email: f.email, title: f.title || "",
       initials: (parts[0][0] + (parts[1] ? parts[parts.length - 1][0] : "")).toUpperCase(),
-      color: "#4A6572", roleId: f.roleId, orgId: PF.me().orgId, teamIds: f.teamIds || [], active: false, invited: true
+      color: "#4A6572", roleId: f.roleId, orgId: orgId, teamIds: teamIds, active: false, invited: true
     };
     PF.db.users.push(u);
-    (f.teamIds || []).forEach(function (tid) {
+    teamIds.forEach(function (tid) {
       var tm = PF.team(tid);
       if (tm && tm.memberIds.indexOf(u.id) < 0) tm.memberIds.push(u.id);
     });
@@ -760,6 +857,7 @@
   act.setUserRole = function (userId, roleId) {
     if (!PF.guard("user.manage", "alterar papéis de acesso")) return;
     var u = PF.user(userId);
+    if (!u || !PF.inMyOrg(u.orgId) || !PF.byId("roles", roleId) || u.id === PF.me().id) return;
     var old = u.roleId;
     u.roleId = roleId;
     audit("update", "user", u.id, null, { role: old }, { role: roleId }, "alterou o papel de " + u.name + " para " + PF.roleName(roleId), "ui");
@@ -1166,6 +1264,15 @@
       t.classList.add("leaving");
       setTimeout(function () { t.remove(); }, 220);
     }, 4200);
+  };
+
+  // a Clipboard API devolve Promise: o aviso de sucesso só aparece quando a cópia acontece de fato
+  PF.copyText = function (text, okTitle) {
+    function fail() { PF.toast("Não foi possível copiar", "O navegador bloqueou a área de transferência.", "warn"); }
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) { fail(); return; }
+      navigator.clipboard.writeText(text).then(function () { PF.toast(okTitle || "Copiado", "", "ok"); }, fail);
+    } catch (e) { fail(); }
   };
 
   PF.emptyState = function (iconName, title, msg, action) {

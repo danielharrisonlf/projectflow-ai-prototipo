@@ -12,7 +12,7 @@
     { head: "Workspace" },
     { route: "dashboard", label: "Início", icon: "home" },
     { route: "projects", label: "Meus projetos", icon: "folders" },
-    { route: "my-tasks", label: "Minhas tarefas", icon: "tasks", cnt: function () { return PF.db.tasks.filter(function (t) { return t.assigneeId === PF.me().id && t.status !== "done"; }).length; } },
+    { route: "my-tasks", label: "Minhas tarefas", icon: "tasks", cnt: function () { var me = PF.me().id; return PF.visibleTasks().filter(function (t) { return !t.parentId && t.assigneeId === me && t.status !== "done"; }).length; } },
     { route: "teams", label: "Equipes", icon: "users" },
     { head: "Projetos" },
     { route: "board", label: "Kanban", icon: "board" },
@@ -132,13 +132,11 @@
     });
     sb.appendChild(nav);
 
-    var me = PF.me();
-    sb.appendChild(h("div", { class: "sb-footer" },
-      h("button", {
-        class: "sb-item", onclick: function () { PF.resetDemo(); }
-      }, icon("refresh", 16), h("span", { class: "grow" }, "Restaurar demonstração"))
-    ));
-    void me;
+    if (PF.can("user.manage")) {
+      sb.appendChild(h("div", { class: "sb-footer" },
+        h("button", { class: "sb-item", onclick: PF.ui.confirmReset }, icon("refresh", 16), h("span", { class: "grow" }, "Restaurar demonstração"))
+      ));
+    }
     return sb;
   }
 
@@ -243,7 +241,7 @@
 
   function renderBell() {
     var me = PF.me();
-    var mine = PF.db.notifications.filter(function (n) { return PF.can("user.manage") || n.toUserId === me.id; });
+    var mine = PF.visibleNotifications();
     var unread = mine.slice(0, 5);
     var btn = h("button", { class: "btn btn-ghost btn-icon bell-wrap", "aria-label": "Notificações", "data-tip": "Notificações", "aria-haspopup": "menu", "aria-expanded": "false" }, icon("bell"));
     if (mine.some(function (n) { return n.status === "failed"; })) btn.appendChild(h("span", { class: "notif-dot" }));
@@ -298,6 +296,11 @@
     return btn;
   }
 
+  PF.ui.confirmReset = function () {
+    PF.confirm({ title: "Restaurar dados de demonstração", msg: "Todas as alterações feitas serão descartadas e o cenário inicial volta.", confirmLabel: "Restaurar", danger: true })
+      .then(function (ok) { if (ok) PF.act.resetDemo(); });
+  };
+
   PF.ui.noAccess = function (what) {
     return PF.emptyState("block", "Acesso restrito",
       "O perfil “" + PF.roleName(PF.me().roleId) + "” não tem acesso a " + (what || "esta área") + ". Troque o perfil no canto superior direito para experimentar.",
@@ -338,9 +341,9 @@
       ], String(dashF.period), function (v) { dashF.period = +v; PF.refresh(); }, { "aria-label": "Período" }));
       fbar.appendChild(PF.select([{ value: "", label: "Todos os projetos" }].concat(projects.map(function (p) { return { value: p.id, label: p.name }; })),
         dashF.projectId, function (v) { dashF.projectId = v; PF.refresh(); }, { "aria-label": "Projeto" }));
-      fbar.appendChild(PF.select([{ value: "", label: "Todas as equipes" }].concat(PF.db.teams.map(function (t) { return { value: t.id, label: t.name }; })),
+      fbar.appendChild(PF.select([{ value: "", label: "Todas as equipes" }].concat(PF.scopeTeams().map(function (t) { return { value: t.id, label: t.name }; })),
         dashF.teamId, function (v) { dashF.teamId = v; PF.refresh(); }, { "aria-label": "Equipe" }));
-      fbar.appendChild(PF.select([{ value: "", label: "Todos os responsáveis" }].concat(PF.db.users.filter(function (u) { return !u.invited; }).map(function (u) { return { value: u.id, label: u.name }; })),
+      fbar.appendChild(PF.select([{ value: "", label: "Todos os responsáveis" }].concat(PF.scopeUsers().filter(function (u) { return !u.invited; }).map(function (u) { return { value: u.id, label: u.name }; })),
         dashF.assigneeId, function (v) { dashF.assigneeId = v; PF.refresh(); }, { "aria-label": "Responsável" }));
       if (dashF.projectId || dashF.teamId || dashF.assigneeId) {
         fbar.appendChild(h("button", { class: "btn btn-ghost btn-sm clear-f", onclick: function () { dashF.projectId = dashF.teamId = dashF.assigneeId = ""; PF.refresh(); } }, icon("x", 12), "Limpar filtros"));
@@ -414,8 +417,10 @@
       pAct.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Atividades recentes"), h("span", { class: "spacer" }),
         PF.can("audit.view") ? h("button", { class: "btn btn-ghost btn-sm", onclick: function () { PF.navigate("/insights/audit"); } }, "Auditoria", icon("arrowR", 12)) : null));
       var actBody = h("div", { class: "panel-body" });
+      var ADMIN_ENTITIES = ["user", "webhook", "notification", "permission", "mcp", "ai"];
       var acts = PF.db.audit.filter(function (a) {
         if (a.projectId && !visIds[a.projectId]) return false;
+        if (!a.projectId && (!PF.canSeeAudit(a) || (!PF.can("audit.view") && ADMIN_ENTITIES.indexOf(a.entityType) >= 0))) return false;
         if (dashF.projectId && a.projectId !== dashF.projectId) return false;
         return new Date(a.ts).getTime() >= cutoff && a.action !== "denied";
       }).slice(0, 8);
@@ -451,7 +456,7 @@
       colR.appendChild(pSpr);
 
       // favoritos
-      var favs = projects.filter(function (p) { return p.favorite; });
+      var favs = projects.filter(function (p) { return PF.isFavorite(p.id); });
       var pFav = h("div", { class: "panel" });
       pFav.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Projetos favoritos")));
       var favBody = h("div", { class: "panel-body flush" });
@@ -475,7 +480,7 @@
       var tt = h("table", { class: "tbl" },
         h("thead", {}, h("tr", {}, h("th", {}, "Equipe"), h("th", { class: "num" }, "Abertas"), h("th", { class: "num" }, "Atrasadas"))));
       var tb = h("tbody");
-      PF.db.teams.forEach(function (tm) {
+      PF.scopeTeams().forEach(function (tm) {
         var tms = tasks.filter(function (t) { return t.teamId === tm.id && t.status !== "done"; });
         if (!tms.length && dashF.teamId && dashF.teamId !== tm.id) return;
         var lateN = tms.filter(PF.isOverdue).length;
@@ -555,11 +560,12 @@
         list.forEach(function (p) {
           var prog = PF.projectProgress(p.id);
           var risk = PF.projectRisk(p);
+          var fav = PF.isFavorite(p.id);
           var starBtn = h("button", {
-            class: "btn btn-ghost btn-icon btn-sm", "aria-label": p.favorite ? "Remover dos favoritos" : "Favoritar",
+            class: "btn btn-ghost btn-icon btn-sm", "aria-label": "Favoritar " + p.name, "aria-pressed": fav ? "true" : "false",
             onclick: function (e) { e.stopPropagation(); PF.act.toggleFavorite(p.id); }
           }, icon("star", 14));
-          if (p.favorite) starBtn.style.color = "var(--warn)";
+          if (fav) starBtn.style.color = "var(--warn)";
           var row = h("tr", { class: "row-click", onclick: function () { PF.navigate("/projects/" + p.id); } },
             h("td", {}, starBtn),
             h("td", {}, h("div", { style: "display:flex;gap:8px;align-items:center" },
@@ -624,17 +630,21 @@
 
   PF.ui.projectModal = function (existing) {
     if (!PF.can(existing ? "project.edit" : "project.create")) { PF.deny(existing ? "editar projetos" : "criar projetos"); return; }
+    var projOrg = existing ? existing.orgId : PF.me().orgId;
     var f = {
       name: h("input", { class: "input", value: existing ? existing.name : "", maxlength: "80" }),
       key: h("input", { class: "input mono", value: existing ? existing.key : "", maxlength: "4", placeholder: "ex.: PCL", disabled: !!existing }),
       desc: h("textarea", { class: "textarea" }, existing ? existing.desc : ""),
       priority: PF.select(PF.PRIORITIES.map(function (p) { return { value: p, label: PF.PRIO_META[p].label }; }), existing ? existing.priority : "medium"),
-      lead: PF.select(PF.db.users.filter(function (u) { return ["admin", "pm", "lead"].indexOf(u.roleId) >= 0; }).map(function (u) { return { value: u.id, label: u.name }; }), existing ? existing.leadId : PF.me().id),
+      lead: PF.select(PF.db.users.filter(function (u) {
+        if (existing && u.id === existing.leadId) return true;
+        return !u.invited && u.orgId === projOrg && ["admin", "pm", "lead"].indexOf(u.roleId) >= 0;
+      }).map(function (u) { return { value: u.id, label: u.name }; }), existing ? existing.leadId : PF.me().id),
       start: h("input", { class: "input", type: "date", value: existing ? existing.startDate : new Date().toISOString().slice(0, 10) }),
       target: h("input", { class: "input", type: "date", value: existing && existing.targetDate ? existing.targetDate : "" }),
       status: PF.select([{ value: "active", label: "Ativo" }, { value: "paused", label: "Pausado" }, { value: "done", label: "Concluído" }], existing ? existing.status : "active")
     };
-    var teamBoxes = PF.db.teams.map(function (tm) {
+    var teamBoxes = PF.db.teams.filter(function (tm) { return tm.orgId === projOrg; }).map(function (tm) {
       var cb = h("input", { type: "checkbox" });
       cb.checked = existing ? existing.teamIds.indexOf(tm.id) >= 0 : false;
       cb.dataset.team = tm.id;
@@ -852,7 +862,7 @@
         PF.can("user.manage") ? h("button", { class: "btn btn-primary", onclick: teamModal }, icon("plus", 14), "Nova equipe") : null));
 
       var grid = h("div", { class: "grid c3" });
-      PF.db.teams.forEach(function (tm) {
+      PF.scopeTeams().forEach(function (tm) {
         var open = PF.db.tasks.filter(function (t) { return t.teamId === tm.id && t.status !== "done" && !t.parentId; });
         var late = open.filter(PF.isOverdue).length;
         var org = PF.byId("orgs", tm.orgId);
@@ -881,7 +891,7 @@
     if (!PF.guard("user.manage", "criar equipes")) return;
     var name = h("input", { class: "input", maxlength: "40" });
     var desc = h("input", { class: "input", maxlength: "90" });
-    var lead = PF.select([{ value: "", label: "Sem líder definido" }].concat(PF.db.users.filter(function (u) { return !u.invited; }).map(function (u) { return { value: u.id, label: u.name }; })), "");
+    var lead = PF.select([{ value: "", label: "Sem líder definido" }].concat(PF.db.users.filter(function (u) { return !u.invited && u.orgId === PF.me().orgId; }).map(function (u) { return { value: u.id, label: u.name }; })), "");
     var form = h("div", {}, PF.field("Nome da equipe", name), PF.field("Descrição", desc), PF.field("Líder", lead));
     PF.modal({
       title: "Nova equipe", body: form,
@@ -928,7 +938,7 @@
 
   /* ============================ ACESSO (usuários e papéis) ============================ */
   PF.routes.access = {
-    title: "Usuários e permissões", app: "workspace",
+    title: "Usuários e permissões", app: "workspace", cap: "team.view",
     render: function (page, params) {
       var tab = params[0] || "users";
       page.appendChild(PF.ui.pageHead("Usuários e permissões",
@@ -947,7 +957,8 @@
             h("th", {}, "Colaborador"), h("th", {}, "Cargo"), h("th", {}, "Organização"),
             h("th", {}, "Equipes"), h("th", {}, "Papel de acesso"), h("th", {}, "Situação"))));
         var tb = h("tbody");
-        PF.db.users.forEach(function (u) {
+        var showEmail = PF.can("user.manage");
+        PF.scopeUsers().forEach(function (u) {
           var org = PF.byId("orgs", u.orgId);
           var roleCell;
           if (PF.can("user.manage") && u.id !== PF.me().id) {
@@ -955,7 +966,7 @@
               function (v) { PF.act.setUserRole(u.id, v); }, { "aria-label": "Papel de " + u.name, style: "min-width:200px" });
           } else roleCell = h("span", { class: "chip" }, PF.roleName(u.roleId));
           tb.appendChild(h("tr", {},
-            h("td", {}, h("span", { class: "who-cell" }, PF.avatarEl(u, "sm"), h("span", {}, h("b", {}, u.name), h("div", { class: "subtle", style: "font-size:11px" }, u.email)))),
+            h("td", {}, h("span", { class: "who-cell" }, PF.avatarEl(u, "sm"), h("span", {}, h("b", {}, u.name), showEmail ? h("div", { class: "subtle", style: "font-size:11px" }, u.email) : null))),
             h("td", {}, u.title || "—"),
             h("td", {}, org ? org.name : "—"),
             h("td", {}, u.teamIds.map(function (tid) { var tm = PF.team(tid); return tm ? h("span", { class: "chip", style: "margin-right:4px" }, tm.name) : null; })),
@@ -981,11 +992,6 @@
           "webhook.view": "ver webhooks", "webhook.manage": "gerenciar webhooks", "mcp.read": "MCP: ferramentas de leitura", "mcp.write": "MCP: ferramentas de escrita",
           "insights.view": "acessar Insights", "audit.view": "central de auditoria", "ai.use": "usar assistente de IA", "ai.apply": "aplicar propostas da IA"
         };
-        var ROLE_CAPS_VIEW = { admin: null, pm: null, lead: null, dev: null, viewer: null };
-        Object.keys(ROLE_CAPS_VIEW).forEach(function (r) {
-          ROLE_CAPS_VIEW[r] = {};
-        });
-        // reconstrói visão a partir de PF.can trocando o papel? usamos a matriz pelo roleId diretamente:
         page.appendChild(h("p", { class: "muted", style: "margin-bottom:12px" },
           "As operações do protótipo validam estas capacidades de fato — esconder o botão não é a única barreira. Tentativas sem permissão são registradas na auditoria."));
         CAP_GROUPS.forEach(function (g) {
@@ -997,10 +1003,7 @@
             tbR.appendChild(h("tr", {},
               h("td", {}, CAP_LABELS[cap] || cap),
               PF.db.roles.map(function (r) {
-                var meBackup = PF.db.settings.currentUserId;
-                // avalia a matriz sem trocar o usuário: usa a tabela interna via usuário fictício
-                var has = roleHasCap(r.id, cap);
-                void meBackup;
+                var has = PF.roleCaps(r.id).indexOf(cap) >= 0;
                 return h("td", { style: "text-align:center" }, has ? h("span", { style: "color:var(--ok);display:inline-flex" }, icon("check", 14)) : h("span", { class: "subtle" }, "—"));
               })));
           });
@@ -1011,24 +1014,13 @@
     }
   };
 
-  function roleHasCap(roleId, cap) {
-    // espelha a matriz do core (ROLE_CAPS é interna; simulamos pelo usuário de referência)
-    var ref = PF.db.users.find(function (u) { return u.roleId === roleId; });
-    if (!ref) return false;
-    var cur = PF.db.settings.currentUserId;
-    PF.db.settings.currentUserId = ref.id;
-    var ok = PF.can(cap);
-    PF.db.settings.currentUserId = cur;
-    return ok;
-  }
-
   function inviteModal() {
     if (!PF.guard("user.manage", "convidar usuários")) return;
     var name = h("input", { class: "input", maxlength: "60" });
     var email = h("input", { class: "input", type: "email", placeholder: "nome@empresa.dev" });
     var title = h("input", { class: "input", maxlength: "50", placeholder: "ex.: Engenheira Backend" });
     var role = PF.select(PF.db.roles.map(function (r) { return { value: r.id, label: r.name }; }), "dev");
-    var teamBoxes = PF.db.teams.map(function (tm) {
+    var teamBoxes = PF.db.teams.filter(function (tm) { return tm.orgId === PF.me().orgId; }).map(function (tm) {
       var cb = h("input", { type: "checkbox" });
       cb.dataset.team = tm.id;
       return h("label", { class: "check" }, cb, h("span", {}, tm.name));
@@ -1125,10 +1117,8 @@
         pd.appendChild(h("div", { class: "panel-body" },
           h("p", { class: "muted" }, "As alterações feitas no protótipo ficam salvas no localStorage do seu navegador e sobrevivem ao recarregamento da página."),
           h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;margin-top:8px" },
-            h("button", { class: "btn btn-danger", onclick: function () {
-              PF.confirm({ title: "Restaurar dados de demonstração", msg: "Todas as alterações feitas serão descartadas e o cenário inicial volta.", confirmLabel: "Restaurar", danger: true })
-                .then(function (ok) { if (ok) PF.resetDemo(); });
-            } }, icon("refresh", 14), "Restaurar dados de demonstração"),
+            PF.can("user.manage") ? h("button", { class: "btn btn-danger", onclick: PF.ui.confirmReset }, icon("refresh", 14), "Restaurar dados de demonstração")
+              : h("p", { class: "subtle", style: "font-size:12px;margin:0" }, "Só o perfil Administrador pode restaurar os dados. Troque o perfil no canto superior direito."),
             h("button", { class: "btn", onclick: function () {
               var blob = new Blob([JSON.stringify(PF.db, null, 2)], { type: "application/json" });
               var a = document.createElement("a");

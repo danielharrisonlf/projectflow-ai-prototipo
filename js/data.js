@@ -115,6 +115,10 @@
       mkProject({ id: "prj-erp", orgId: "org-atlas", key: "ERP", name: "Integração ERP Protheus", desc: "Integração de pedidos e estoque entre o chão de fábrica e o ERP Protheus.", teamIds: ["tm-consult"], leadId: "u16", priority: "medium", startDate: dateOnly(-30), targetDate: dateOnly(70), favorite: false, age: 30, color: "#2B5FD9" })
     ];
 
+    // favoritos são preferência de cada pessoa; a demonstração começa com os projetos destacados
+    var favIds = projects.filter(function (p) { return p.favorite; }).map(function (p) { return p.id; });
+    users.forEach(function (u) { u.favoriteProjectIds = favIds.slice(); });
+
     // ---------- épicos ----------
     var epics = [
       { id: "ep-pcl-1", projectId: "prj-pcl", name: "Central de faturas", desc: "Consulta, download e contestação de faturas.", status: "active", ownerId: "u12" },
