@@ -98,7 +98,7 @@
   function onTimeRate(tasks) {
     var withDue = tasks.filter(function (t) { return t.status === "done" && t.dueDate; });
     if (!withDue.length) return null;
-    var ok = withDue.filter(function (t) { return t.updatedAt.slice(0, 10) <= t.dueDate; }).length;
+    var ok = withDue.filter(function (t) { var d = PF.doneDay(t); return d && d <= t.dueDate; }).length;
     return Math.round(100 * ok / withDue.length);
   }
 
@@ -163,7 +163,7 @@
       var projects = scopeProjects();
       var tasks = scopeTasks();
       var cutoff = Date.now() - insF.period * 86400000;
-      var doneP = tasks.filter(function (t) { return t.status === "done" && new Date(t.updatedAt).getTime() >= cutoff; });
+      var doneP = tasks.filter(function (t) { return t.status === "done" && t.doneAt && new Date(t.doneAt).getTime() >= cutoff; });
       var late = tasks.filter(PF.isOverdue);
       var rate = onTimeRate(tasks);
 
@@ -189,7 +189,7 @@
         var start = Date.now() - (wgi + 1) * 7 * 86400000;
         var end = Date.now() - wgi * 7 * 86400000;
         var n = tasks.filter(function (t) {
-          var ts = new Date(t.updatedAt).getTime();
+          var ts = t.doneAt ? new Date(t.doneAt).getTime() : NaN;
           return t.status === "done" && ts >= start && ts < end;
         }).length;
         buckets.push({ label: PF.fmtDate(new Date(end).toISOString()), y: n });

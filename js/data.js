@@ -77,11 +77,12 @@
       mkUser(9, "Diego Martins", "Engenheiro Backend", "dev", "org-vetor", ["tm-plat", "tm-infra"]),
       mkUser(10, "Eduarda Lopes", "Engenheira Mobile", "dev", "org-vetor", ["tm-mob"]),
       mkUser(11, "Gustavo Henrique", "Engenheiro de Dados", "dev", "org-vetor", ["tm-dados"]),
-      mkUser(12, "Isabela Rocha", "Engenheira Frontend Sr.", "dev", "org-vetor", ["tm-web"]),
-      mkUser(13, "João Pedro Alves", "SRE", "dev", "org-vetor", ["tm-infra"]),
-      mkUser(14, "Larissa Mendes", "Analista de QA", "dev", "org-vetor", ["tm-qa"]),
+      // quem lidera equipe tem o papel de líder (team.manage) e pode responder por projetos
+      mkUser(12, "Isabela Rocha", "Engenheira Frontend Sr.", "lead", "org-vetor", ["tm-web"]),
+      mkUser(13, "João Pedro Alves", "SRE", "lead", "org-vetor", ["tm-infra"]),
+      mkUser(14, "Larissa Mendes", "Analista de QA", "lead", "org-vetor", ["tm-qa"]),
       mkUser(15, "Otávio Ferreira", "Engenheiro Mobile", "dev", "org-vetor", ["tm-mob"]),
-      mkUser(16, "Renata Siqueira", "Consultora de Processos", "dev", "org-atlas", ["tm-consult"]),
+      mkUser(16, "Renata Siqueira", "Consultora de Processos", "lead", "org-atlas", ["tm-consult"]),
       mkUser(17, "Thiago Barbosa", "Consultor Industrial", "dev", "org-atlas", ["tm-consult"]),
       mkUser(18, "Sérgio Tavares", "Auditor Interno", "viewer", "org-vetor", [])
     ];
@@ -429,6 +430,9 @@
         });
       }
     });
+
+    // data de conclusão: no seed coincide com a última atualização
+    tasks.forEach(function (t) { t.doneAt = t.status === "done" ? t.updatedAt : null; });
 
     // bloqueios
     var open = tasks.filter(function (t) { return ["todo", "in_progress"].indexOf(t.status) >= 0 && !t.parentId; });

@@ -56,7 +56,12 @@
     }
   });
 
+  // grava alterações pendentes antes de sair ou esconder a página
+  window.addEventListener("pagehide", function () { PF.flushSave(); });
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") PF.flushSave(); });
+
   if (!location.hash) location.hash = "#/dashboard";
   PF.renderApp();
   PF.announceRoute();
+  if (PF._loadNotice) { PF.toast("Dados restaurados", PF._loadNotice, "warn"); PF._loadNotice = null; }
 })();

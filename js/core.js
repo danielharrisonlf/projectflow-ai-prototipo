@@ -10,29 +10,98 @@
   var PF = window.PF = {};
   var LS_KEY = "projectflow.db.v1";
 
-  /* ---------- persistência ---------- */
+  /* ---------- persistência ----------
+     O estado salvo é validado e migrado ao carregar; se não der para
+     aproveitar, volta ao cenário inicial e a pessoa é avisada. */
+  var SCHEMA = 2;
+  var ARRAYS = ["orgs", "roles", "users", "teams", "projects", "epics", "sprints", "milestones", "tasks", "comments",
+    "audit", "events", "webhooks", "deliveries", "notifications", "notifTemplates", "mcpTools", "mcpAgents", "mcpExecutions"];
+  var OBJECTS = ["meta", "settings", "notifPrefs", "providers", "taskCounters"];
+  function isObj(v) { return v != null && typeof v === "object" && !Array.isArray(v); }
+  function shapeOk(db) {
+    if (!isObj(db)) return false;
+    if (OBJECTS.some(function (k) { return !isObj(db[k]); })) return false;
+    if (ARRAYS.some(function (k) { return !Array.isArray(db[k]); })) return false;
+    if (!db.users.length || !db.roles.length) return false;
+    return db.tasks.every(function (t) { return isObj(t) && typeof t.id === "string" && typeof t.ref === "string" && typeof t.projectId === "string"; })
+      && db.users.every(function (u) { return isObj(u) && typeof u.id === "string" && typeof u.name === "string"; })
+      && db.projects.every(function (p) { return isObj(p) && typeof p.id === "string" && typeof p.key === "string" && typeof p.name === "string"; });
+  }
+  // migrações incrementais (schema 1 = estado salvo antes desta versão do protótipo)
+  var MIGRATIONS = {
+    2: function (db) {
+      // data de conclusão real (antes inferida de updatedAt) e favoritos por pessoa
+      db.tasks.forEach(function (t) { if (!("doneAt" in t)) t.doneAt = t.status === "done" ? t.updatedAt || null : null; });
+      var favIds = db.projects.filter(function (p) { return p.favorite; }).map(function (p) { return p.id; });
+      db.users.forEach(function (u) { if (!Array.isArray(u.favoriteProjectIds)) u.favoriteProjectIds = favIds.slice(); });
+    }
+  };
+  // conserta valores fora do domínio que quebrariam a renderização
+  function sanitize(db) {
+    var ST = ["backlog", "todo", "in_progress", "in_review", "done"], PR = ["urgent", "high", "medium", "low"];
+    db.tasks.forEach(function (t) {
+      if (ST.indexOf(t.status) < 0) t.status = "todo";
+      if (PR.indexOf(t.priority) < 0) t.priority = "medium";
+      if (["task", "bug", "subtask"].indexOf(t.type) < 0) t.type = t.parentId ? "subtask" : "task";
+      if (typeof t.title !== "string" || !t.title.trim()) t.title = String(t.title || "") || "(sem título)";
+      ["labels", "acceptance", "blockedBy"].forEach(function (k) { if (!Array.isArray(t[k])) t[k] = []; });
+      if (t.dueDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(t.dueDate)) t.dueDate = null;
+    });
+    db.users.forEach(function (u) { if (!Array.isArray(u.teamIds)) u.teamIds = []; });
+    db.teams.forEach(function (t) { if (!Array.isArray(t.memberIds)) t.memberIds = []; });
+    db.projects.forEach(function (p) { if (!Array.isArray(p.teamIds)) p.teamIds = []; });
+    if (!db.users.some(function (u) { return u.id === db.settings.currentUserId; })) {
+      db.settings.currentUserId = (db.users.find(function (u) { return u.roleId === "admin"; }) || db.users[0]).id;
+    }
+  }
   PF.load = function () {
+    var notice = null;
     try {
       var raw = localStorage.getItem(LS_KEY);
       if (raw) {
         var db = JSON.parse(raw);
-        if (db && db.meta && db.meta.seedVersion === PFSeed.VERSION) { PF.db = db; return; }
+        if (!db || !db.meta || db.meta.seedVersion !== PFSeed.VERSION) {
+          notice = "Os dados salvos eram de outra versão da demonstração e foram substituídos pelo cenário inicial.";
+        } else if (!shapeOk(db)) {
+          notice = "Os dados salvos estavam incompletos e foram substituídos pelo cenário inicial.";
+        } else {
+          for (var v = (db.meta.schema || 1) + 1; v <= SCHEMA; v++) if (MIGRATIONS[v]) MIGRATIONS[v](db);
+          db.meta.schema = SCHEMA;
+          sanitize(db);
+          PF.db = db;
+          return;
+        }
       }
-    } catch (e) { /* storage indisponível ou corrompido: cai para o seed */ }
+    } catch (e) {
+      notice = "Os dados salvos não puderam ser lidos e foram substituídos pelo cenário inicial.";
+    }
     PF.db = PFSeed.build();
+    PF.db.meta.schema = SCHEMA;
     PF.save();
+    PF._loadNotice = notice;
   };
-  var saveT = null;
+  var saveT = null, saveWarned = false;
+  function writeNow() {
+    saveT = null;
+    try { localStorage.setItem(LS_KEY, JSON.stringify(PF.db)); saveWarned = false; }
+    catch (e) {
+      // quota/modo privado: avisa uma vez em vez de perder alterações em silêncio
+      if (!saveWarned && PF.toast) { saveWarned = true; PF.toast("Não foi possível salvar", "O navegador recusou a gravação local; as alterações valem só até recarregar a página.", "warn"); }
+    }
+  }
   PF.save = function () {
     clearTimeout(saveT);
-    saveT = setTimeout(function () {
-      try { localStorage.setItem(LS_KEY, JSON.stringify(PF.db)); } catch (e) { /* quota/privado */ }
-    }, 120);
+    saveT = setTimeout(writeNow, 120);
+  };
+  // grava imediatamente o que estiver pendente (saída ou ocultação da página)
+  PF.flushSave = function () {
+    if (saveT) { clearTimeout(saveT); writeNow(); }
   };
   PF.resetDemo = function () {
     clearTimeout(saveT);
     try { localStorage.removeItem(LS_KEY); } catch (e) {}
     PF.db = PFSeed.build();
+    PF.db.meta.schema = SCHEMA;
     PF.save();
     PF.toast("Dados de demonstração restaurados", "Todo o estado voltou ao cenário inicial.", "ok");
     PF.refresh();
@@ -738,7 +807,7 @@
       status: f.status || "todo", priority: f.priority || "medium",
       assigneeId: f.assigneeId || null, teamId: f.teamId || p.teamIds[0] || null,
       sprintId: f.sprintId || null, labels: f.labels || [], acceptance: f.acceptance || [],
-      blockedBy: [], createdAt: now, updatedAt: now,
+      blockedBy: [], createdAt: now, updatedAt: now, doneAt: f.status === "done" ? now : null,
       dueDate: f.dueDate || null, createdBy: PF.me().id
     };
     PF.db.tasks.push(t);
@@ -770,6 +839,8 @@
     });
     if (!Object.keys(after).length) return false;
     t.updatedAt = new Date().toISOString();
+    // data de conclusão real: KPIs de entrega não mudam quando uma tarefa concluída é editada
+    if ("status" in after) t.doneAt = after.status === "done" ? t.updatedAt : null;
 
     if ("status" in after) {
       audit("status", "task", t.id, t.projectId, { status: before.status }, { status: after.status },
@@ -1522,6 +1593,8 @@
   };
 
   /* ---------- derivações de domínio ---------- */
+  // dia (calendário local) em que a tarefa foi concluída
+  PF.doneDay = function (t) { return t.status === "done" && t.doneAt ? PF.ymd(new Date(t.doneAt)) : null; };
   PF.projectTasks = function (projectId) {
     return PF.db.tasks.filter(function (t) { return t.projectId === projectId; });
   };

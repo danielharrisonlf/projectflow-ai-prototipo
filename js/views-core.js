@@ -68,7 +68,14 @@
     if (route.cap && !PF.can(route.cap)) {
       page.appendChild(PF.ui.noAccess(route.title));
     } else {
-      route.render(page, parts.slice(1));
+      try { route.render(page, parts.slice(1)); }
+      catch (e) {
+        // estado inconsistente não deixa o app sem saída
+        if (window.console) console.error(e);
+        page.replaceChildren(PF.emptyState("alert", "Não foi possível exibir esta tela",
+          "Os dados desta demonstração parecem inconsistentes. Restaurar o cenário inicial resolve.",
+          h("button", { class: "btn btn-primary", onclick: function () { PF.resetDemo(); } }, icon("refresh", 14), "Restaurar dados da demonstração")));
+      }
     }
     // títulos de painel ficam um nível abaixo do h1 da página (h3 mantém o estilo atual)
     page.querySelectorAll(".panel-head h3").forEach(function (t) { t.setAttribute("role", "heading"); t.setAttribute("aria-level", "2"); });
@@ -372,7 +379,7 @@
       var late = tasks.filter(PF.isOverdue);
       var next7 = tasks.filter(function (t) { var d = PF.daysLeft(t.dueDate); return t.status !== "done" && d != null && d >= 0 && d <= 7; });
       var activeSprints = PF.db.sprints.filter(function (s) { return s.status === "active" && visIds[s.projectId] && (!dashF.projectId || s.projectId === dashF.projectId); });
-      var doneInPeriod = tasks.filter(function (t) { return t.status === "done" && new Date(t.updatedAt).getTime() >= cutoff; });
+      var doneInPeriod = tasks.filter(function (t) { return t.status === "done" && t.doneAt && new Date(t.doneAt).getTime() >= cutoff; });
 
       var strip = h("div", { class: "stat-strip", style: "margin-bottom:14px" });
       function stat(lbl, val, ctx, ctxClass, onclick) {
