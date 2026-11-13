@@ -199,11 +199,11 @@
         h("div", { class: "panel-body" }, lineChart(buckets, { label: "Tarefas concluídas por semana", unit: "concluídas" })));
       grid.appendChild(p1);
 
-      // distribuição por status (série única: magnitude; identidade vem do glifo + rótulo)
+      // distribuição por status: cor do status, sempre com glifo + rótulo (nunca cor sozinha)
       var p2 = h("div", { class: "panel" },
         h("div", { class: "panel-head" }, h("h3", {}, "Tarefas por status")));
       var statusItems = PF.STATUSES.map(function (st) {
-        return { label: PF.STATUS_META[st].label, icon: PF.statusIcon(st, 13), value: tasks.filter(function (t) { return t.status === st; }).length };
+        return { label: PF.STATUS_META[st].label, icon: PF.statusIcon(st, 13), color: PF.STATUS_META[st].color, value: tasks.filter(function (t) { return t.status === st; }).length };
       });
       p2.appendChild(h("div", { class: "panel-body" }, barList(statusItems, { label: "Distribuição de tarefas por status", labelW: 130, unit: "tarefas" })));
       grid.appendChild(p2);
