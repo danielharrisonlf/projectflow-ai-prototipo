@@ -171,13 +171,13 @@
       function stat(lbl, val, ctx, cls) {
         strip.appendChild(h("div", { class: "stat" }, h("div", { class: "lbl" }, lbl), h("div", { class: "val" }, String(val)), ctx ? h("div", { class: "ctx " + (cls || "") }, ctx) : null));
       }
-      stat("Projetos ativos", projects.filter(function (p) { return p.status === "active"; }).length, projects.length + " no recorte");
+      stat("Projetos ativos", projects.filter(function (p) { return p.status === "active"; }).length, PF.plural(projects.length, "projeto nos filtros", "projetos nos filtros"));
       stat("Projetos concluídos", projects.filter(function (p) { return p.status === "done"; }).length);
       var atRisk = projects.filter(function (p) { return p.status === "active" && PF.projectRisk(p).level === "high"; }).length;
       stat("Projetos em risco", atRisk, atRisk ? "exigem atenção" : "nenhum", atRisk ? "bad" : "good");
-      stat("Tarefas concluídas", doneP.length, "últimos " + insF.period + " dias", "good");
+      stat("Tarefas concluídas", doneP.length, "últimos " + insF.period + " dias");
       stat("Tarefas atrasadas", late.length, "em aberto hoje", late.length ? "bad" : "good");
-      stat("Cumprimento de prazos", rate == null ? "—" : rate + "%", "entregas no prazo", rate != null && rate < 70 ? "bad" : "good");
+      stat("Cumprimento de prazos", rate == null ? "—" : rate + "%", "tarefas concluídas no prazo", rate != null && rate < 70 ? "bad" : "");
       page.appendChild(strip);
 
       var grid = h("div", { class: "grid c2" });
@@ -195,7 +195,7 @@
         buckets.push({ label: PF.fmtDate(new Date(end).toISOString()), y: n });
       }
       var p1 = h("div", { class: "panel" },
-        h("div", { class: "panel-head" }, h("h3", {}, "Evolução das entregas"), h("span", { class: "spacer" }), h("span", { class: "subtle", style: "font-size:11.5px" }, "tarefas concluídas por semana")),
+        h("div", { class: "panel-head" }, h("h3", {}, "Evolução das conclusões"), h("span", { class: "spacer" }), h("span", { class: "subtle", style: "font-size:11.5px" }, "tarefas concluídas por semana")),
         h("div", { class: "panel-body" }, lineChart(buckets, { label: "Tarefas concluídas por semana", unit: "concluídas" })));
       grid.appendChild(p1);
 
@@ -229,7 +229,7 @@
 
       // cumprimento de prazo por equipe
       var p4 = h("div", { class: "panel" },
-        h("div", { class: "panel-head" }, h("h3", {}, "Prazos por equipe"), h("span", { class: "spacer" }), h("span", { class: "subtle", style: "font-size:11.5px" }, "% de entregas no prazo")));
+        h("div", { class: "panel-head" }, h("h3", {}, "Prazos por equipe"), h("span", { class: "spacer" }), h("span", { class: "subtle", style: "font-size:11.5px" }, "% de tarefas concluídas no prazo")));
       var teamItems = [];
       PF.scopeTeams().forEach(function (tm) {
         var tts = tasks.filter(function (t) { return t.teamId === tm.id; });
@@ -299,7 +299,7 @@
       var tbl = h("table", { class: "tbl" },
         h("thead", {}, h("tr", {}, h("th", {}, "Projeto"), h("th", {}, "Progresso"),
           h("th", { class: "num" }, "Tarefas"), h("th", { class: "num" }, "Atrasadas"), h("th", { class: "num" }, "Bloqueadas"),
-          h("th", { class: "num" }, "No prazo"), h("th", {}, "Entrega"), h("th", {}, "Situação"))));
+          h("th", { class: "num" }, "No prazo"), h("th", {}, "Data de entrega"), h("th", {}, "Situação"))));
       var tb = h("tbody");
       projects.forEach(function (p) {
         var ts = tasks.filter(function (t) { return t.projectId === p.id; });
@@ -336,7 +336,7 @@
         var pct = ts.length ? Math.round(100 * done / ts.length) : 0;
         tb2.appendChild(h("tr", {},
           h("td", {}, h("b", {}, sp.name), h("div", { class: "subtle", style: "font-size:10.5px" }, PF.project(sp.projectId).name)),
-          h("td", {}, sp.status === "active" ? h("span", { class: "chip accent" }, "ativa") : sp.status === "done" ? h("span", { class: "chip ok" }, "concluída") : h("span", { class: "chip" }, "planejada")),
+          h("td", {}, sp.status === "active" ? h("span", { class: "chip accent" }, "Ativa") : sp.status === "done" ? h("span", { class: "chip ok" }, "Concluída") : h("span", { class: "chip" }, "Planejada")),
           h("td", { class: "num" }, String(ts.length)),
           h("td", { class: "num" }, String(done)),
           h("td", {}, h("div", { style: "display:flex;gap:8px;align-items:center" }, PF.progressBar(pct, pct === 100, "Conclusão da " + sp.name), h("span", { class: "num muted", style: "font-size:11.5px", "aria-hidden": "true" }, pct + "%")))));
@@ -401,7 +401,7 @@
             h("a", { href: "#", class: "mono", onclick: function (e) { e.preventDefault(); PF.ui.openTask(t.id); } }, t.ref),
             " " + t.title,
             h("div", { class: "subtle", style: "font-size:11px" }, "aguarda " + blockers.map(function (b) { return b.ref + " (" + PF.STATUS_META[b.status].label + ")"; }).join(", "))),
-          PF.isOverdue(t) ? h("span", { class: "chip danger" }, "atrasada") : null));
+          PF.isOverdue(t) ? h("span", { class: "chip danger" }, "Atrasada") : null));
       });
       pd.appendChild(pdB);
       grid2.appendChild(pd);
@@ -423,7 +423,7 @@
     title: "Central de auditoria", app: "insights", cap: "audit.view",
     render: function (page) {
       page.appendChild(PF.ui.pageHead("Central de auditoria",
-        "Trilha completa das ações: quem fez, o quê, em qual entidade, com valores anteriores e novos, e a origem (interface, automação, API ou agente MCP)."));
+        "Trilha completa das ações: quem fez, o quê, em qual entidade, com valores anteriores e novos, e a origem (interface, IA, agente MCP, automação ou API)."));
 
       if (audF.userId && !PF.scopeUsers().some(function (u) { return u.id === audF.userId; })) audF.userId = "";
       if (audF.projectId && !PF.db.projects.some(function (p) { return p.id === audF.projectId && PF.inMyOrg(p.orgId); })) audF.projectId = "";
@@ -434,7 +434,7 @@
         audF.projectId, function (v) { audF.projectId = v; audF.page = 0; PF.refresh(); }, { "aria-label": "Projeto" }));
       fbar.appendChild(PF.select([{ value: "", label: "Todas as ações" }].concat(Object.keys(ACTION_LABELS).map(function (a) { return { value: a, label: ACTION_LABELS[a] }; })),
         audF.action, function (v) { audF.action = v; audF.page = 0; PF.refresh(); }, { "aria-label": "Ação" }));
-      fbar.appendChild(PF.select([{ value: "", label: "Todas as origens" }, { value: "ui", label: "Interface" }, { value: "mcp", label: "Agente MCP" }, { value: "automation", label: "Automação" }, { value: "api", label: "API" }, { value: "ai", label: "IA" }],
+      fbar.appendChild(PF.select([{ value: "", label: "Todas as origens" }].concat(Object.keys(PF.SOURCE_META).map(function (k) { return { value: k, label: PF.SOURCE_META[k] }; })),
         audF.source, function (v) { audF.source = v; audF.page = 0; PF.refresh(); }, { "aria-label": "Origem" }));
       fbar.appendChild(PF.select([{ value: "", label: "Todas as entidades" }].concat(Object.keys(ENTITY_LABELS).map(function (e) { return { value: e, label: ENTITY_LABELS[e] }; })),
         audF.entityType, function (v) { audF.entityType = v; audF.page = 0; PF.refresh(); }, { "aria-label": "Entidade" }));
@@ -475,13 +475,13 @@
           h("td", {}, h("span", { class: "chip" + (a.action === "denied" ? " danger" : a.action === "delete" ? " warn" : "") }, ACTION_LABELS[a.action] || a.action)),
           h("td", {}, ENTITY_LABELS[a.entityType] || a.entityType),
           h("td", {}, proj ? proj.name : "—"),
-          h("td", {}, h("span", { class: "src-tag " + a.source }, a.source === "ui" ? "interface" : a.source)),
+          h("td", {}, h("span", { class: "src-tag " + a.source }, PF.sourceLabel(a.source))),
           h("td", { style: "max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, h("button", { type: "button", class: "row-link", style: PF.ROWLINK_STYLE, title: a.summary }, a.summary))));
       });
       tbl.appendChild(tb);
       var panel = h("div", { class: "panel" }, h("div", { class: "tbl-wrap" }, tbl));
       panel.appendChild(h("div", { class: "pager" },
-        h("span", { class: "num" }, rows.length + " registros"),
+        h("span", { class: "num" }, PF.plural(rows.length, "registro", "registros")),
         h("span", { class: "grow" }),
         h("button", { class: "btn btn-sm", disabled: audF.page === 0, onclick: function () { audF.page--; PF.refresh(); } }, icon("chevL", 12), "Anterior"),
         h("span", { class: "num" }, (audF.page + 1) + " / " + pages),
@@ -493,8 +493,14 @@
   function fmtVal(key, val) {
     if (val == null) return "—";
     if (key === "assigneeId") { var u = PF.user(val); return u ? u.name : String(val); }
-    if (key === "status" && PF.STATUS_META[val]) return PF.STATUS_META[val].label.toUpperCase();
-    if (key === "priority" && PF.PRIO_META[val]) return PF.PRIO_META[val].label.toUpperCase();
+    if (key === "status" && PF.STATUS_META[val]) return PF.STATUS_META[val].label;
+    if (key === "priority" && PF.PRIO_META[val]) return PF.PRIO_META[val].label;
+    if (key === "labels" && Array.isArray(val)) return val.length ? val.map(PF.labelName).join(", ") : "—";
+    if ((key === "blockedBy" || key === "teamIds") && val != null) {
+      var arr = Array.isArray(val) ? val : [val];
+      return arr.map(function (id) { var x = key === "teamIds" ? PF.team(id) : PF.task(id); return x ? (x.ref || x.name) : id; }).join(", ") || "—";
+    }
+    if ((key === "sprintId" || key === "epicId") && val) { var o = PF.byId(key === "sprintId" ? "sprints" : "epics", val); return o ? o.name : String(val); }
     if (Array.isArray(val)) return val.length ? val.join(", ") : "—";
     if (typeof val === "object") return JSON.stringify(val);
     return String(val);
@@ -516,7 +522,7 @@
       h("span", { class: "pl" }, "Papel"), h("span", {}, u ? PF.roleName(u.roleId) : "—"),
       h("span", { class: "pl" }, "Entidade"), h("span", {}, (ENTITY_LABELS[a.entityType] || a.entityType) + (a.entityId ? " · " + a.entityId : "")),
       h("span", { class: "pl" }, "Projeto"), proj ? h("a", { href: "#/projects/" + proj.id, onclick: function () { PF.closeOverlays(); } }, proj.name) : h("span", {}, "—"),
-      h("span", { class: "pl" }, "Origem"), h("span", {}, h("span", { class: "src-tag " + a.source }, a.source === "ui" ? "ProjectFlow Workspace" : a.source === "mcp" ? "Agente MCP" : a.source === "ai" ? "Assistente de IA" : a.source)),
+      h("span", { class: "pl" }, "Origem"), h("span", {}, h("span", { class: "src-tag " + a.source }, PF.sourceLabel(a.source))),
       h("span", { class: "pl" }, "Data e hora"), h("span", {}, PF.fmtDateTime(a.ts))));
 
     body.appendChild(h("div", { class: "section-h" }, "O que aconteceu"));
@@ -527,7 +533,7 @@
       var keys = {};
       Object.keys(a.before || {}).forEach(function (k) { keys[k] = 1; });
       Object.keys(a.after || {}).forEach(function (k) { keys[k] = 1; });
-      var FIELD_PT = { status: "Status", priority: "Prioridade", assigneeId: "Responsável", title: "Título", name: "Nome", desc: "Descrição", dueDate: "Vencimento", archived: "Arquivado", teamIds: "Equipes", labels: "Etiquetas", role: "Papel", active: "Ativo", url: "URL", events: "Eventos", member: "Integrante", blockedBy: "Bloqueada por", targetDate: "Entrega", startDate: "Início", key: "Chave", leadId: "Responsável", fields: "Campos", acceptance: "Critérios", sprintId: "Sprint", epicId: "Épico", channel: "Canal", enabled: "Ligado", goal: "Meta" };
+      var FIELD_PT = { status: "Status", priority: "Prioridade", assigneeId: "Responsável", title: "Título", name: "Nome", desc: "Descrição", dueDate: "Prazo", archived: "Arquivado", teamIds: "Equipes", labels: "Etiquetas", role: "Papel", active: "Ativo", url: "URL", events: "Eventos", member: "Membro", blockedBy: "Bloqueada por", targetDate: "Data de entrega", startDate: "Início", key: "Chave", leadId: "Responsável", fields: "Campos", acceptance: "Critérios", sprintId: "Sprint", epicId: "Épico", channel: "Canal", enabled: "Ligado", goal: "Meta" };
       var tbl = h("table", { class: "diff-table" },
         h("thead", {}, h("tr", {}, h("th", {}, "Campo"), h("th", {}, "Valor anterior"), h("th", {}, "Novo valor"))));
       var tb = h("tbody");

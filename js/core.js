@@ -109,7 +109,6 @@
 
   /* ---------- helpers ---------- */
   PF.uid = function (p) { return (p || "id") + Math.random().toString(36).slice(2, 9); };
-  PF.esc = function (s) { return String(s == null ? "" : s); }; // texto sempre via textContent
   PF.byId = function (coll, id) { return PF.db[coll].find(function (x) { return x.id === id; }) || null; };
   PF.user = function (id) { return PF.byId("users", id); };
   PF.me = function () { return PF.user(PF.db.settings.currentUserId); };
@@ -178,8 +177,7 @@
       if (k === "class") el.className = v;
       else if (k === "dataset") Object.keys(v).forEach(function (d) { el.dataset[d] = v[d]; });
       else if (k === "style") el.style.cssText = v;
-      else if (k.slice(0, 2) === "on" && typeof v === "function") el.addEventListener(k.slice(2), v);
-      else if (k === "html") el.innerHTML = v; // apenas para SVG interno de ícones
+      else if (k.slice(0, 2) === "on") { if (typeof v === "function") el.addEventListener(k.slice(2), v); } // nunca vira handler inline
       else if (v === true) el.setAttribute(k, "");
       else el.setAttribute(k, v);
     });
@@ -351,9 +349,19 @@
     return h("span", { class: "who-cell" }, av, h("span", { class: "nm" }, u.name));
   };
   PF.LABELS = ["backend", "frontend", "mobile", "infra", "dados", "ux", "seguranca", "performance", "documentacao", "cliente"];
+  // a chave fica no dado; a interface mostra o nome com acento e caixa corretos
+  PF.LABEL_META = {
+    backend: "Backend", frontend: "Frontend", mobile: "Mobile", infra: "Infraestrutura", dados: "Dados", ux: "UX",
+    seguranca: "Segurança", performance: "Performance", documentacao: "Documentação", cliente: "Cliente"
+  };
+  PF.labelName = function (key) { return PF.LABEL_META[key] || key; };
+  // origem dos registros de auditoria, com um único texto em toda a interface
+  PF.SOURCE_META = { ui: "Interface", ai: "IA", mcp: "Agente MCP", automation: "Automação", api: "API" };
+  PF.sourceLabel = function (src) { return PF.SOURCE_META[src] || src; };
+  PF.plural = function (n, one, many) { return n + " " + (n === 1 ? one : many); };
   PF.labelChip = function (name) {
     var colors = { backend: "#2B5FD9", frontend: "#B23A78", mobile: "#6D4FC4", infra: "#0E7490", dados: "#9A5B00", ux: "#3D7068", seguranca: "#BE3030", performance: "#7A5C2E", documentacao: "#4A6572", cliente: "#1D7A4C" };
-    var c = h("span", { class: "label-chip" }, name);
+    var c = h("span", { class: "label-chip" }, PF.labelName(name));
     c.style.setProperty("--lc", colors[name] || "var(--ink-3)");
     return c;
   };
@@ -494,7 +502,7 @@
       httpStatus: fail ? 503 : 200, attempts: attempts,
       payload: { id: ev.id, type: ev.type, occurredAt: ev.ts, data: ev.payload }
     });
-    if (fail) PF.toast("Entrega de webhook falhou", wh.name + " respondeu 503 — 3 tentativas registradas.", "warn");
+    if (fail) PF.toast("Envio de webhook falhou", wh.name + " respondeu 503 — 3 tentativas registradas.", "warn");
   }
 
   var NOTIF_MAP = {
@@ -524,7 +532,7 @@
         id: PF.uid("nf"), ts: new Date().toISOString(), channel: ch, templateId: tpl.id,
         eventType: tpl.event, toUserId: toId, subject: subj, body: body,
         status: provider.configured ? "delivered" : "failed",
-        attempts: provider.configured ? 1 : 1,
+        attempts: 1,
         failReason: provider.configured ? null : "Provedor de " + ch.toUpperCase() + " não configurado"
       });
     });
@@ -1088,7 +1096,7 @@
     var team = PF.team(teamId);
     var me = PF.me();
     var allowed = PF.can("user.manage") || (PF.can("team.manage") && team.leadId === me.id);
-    if (!allowed) { PF.deny("gerenciar integrantes da equipe " + team.name); return; }
+    if (!allowed) { PF.deny("gerenciar os membros da equipe " + team.name); return; }
     var u = PF.user(userId);
     if (!u || u.orgId !== team.orgId) { PF.toast("Pessoa de outra organização", "Só é possível incluir pessoas da organização da equipe.", "err"); return; }
     var idx = team.memberIds.indexOf(userId);

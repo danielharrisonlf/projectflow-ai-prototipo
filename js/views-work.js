@@ -54,7 +54,7 @@
       PF.field("Título", f.title, { span2: true, required: true }),
       PF.field("Tipo", f.type), PF.field("Prioridade", f.priority),
       PF.field("Responsável", f.assignee), PF.field("Épico", f.epic),
-      PF.field("Sprint", f.sprint), PF.field("Vencimento", f.due),
+      PF.field("Sprint", f.sprint), PF.field("Prazo", f.due),
       PF.fieldGroup("Etiquetas", h("div", {}, labelBoxes), { span2: true }),
       PF.field("Descrição", f.desc, { span2: true }),
       PF.field("Critérios de aceite", f.accept, { span2: true })
@@ -165,8 +165,8 @@
       var dueIn = h("input", { class: "input", type: "date", value: t.dueDate || "", disabled: !canEdit });
       dueIn.addEventListener("change", function () { PF.act.updateTask(t.id, { dueDate: dueIn.value || null }); });
       var dueWrap = h("div", { style: "display:flex;gap:8px;align-items:center" }, dueIn);
-      if (PF.isOverdue(t)) dueWrap.appendChild(h("span", { class: "chip danger" }, "atrasada"));
-      prop("Vencimento", dueWrap);
+      if (PF.isOverdue(t)) dueWrap.appendChild(h("span", { class: "chip danger" }, "Atrasada"));
+      prop("Prazo", dueWrap);
 
       prop("Projeto", h("a", { href: "#/projects/" + p.id, onclick: function () { PF.closeOverlays(); } }, p.name));
       props.appendChild(h("span", { class: "pl" }, "Criada"));
@@ -177,11 +177,11 @@
       var labRow = h("div", { style: "display:flex;gap:6px;flex-wrap:wrap;align-items:center" });
       t.labels.forEach(function (l) { labRow.appendChild(PF.labelChip(l)); });
       if (canEdit) {
-        var addLab = h("button", { class: "btn btn-ghost btn-sm", "aria-label": "Editar etiquetas", "aria-haspopup": "menu", "aria-expanded": "false" }, icon("tag", 13), "Etiquetas");
+        var addLab = h("button", { class: "btn btn-ghost btn-sm", "aria-haspopup": "menu", "aria-expanded": "false" }, icon("tag", 13), "Etiquetas");
         addLab.addEventListener("click", function () {
           PF.menu(addLab, LABELS.map(function (l) {
             return {
-              label: l, checked: t.labels.indexOf(l) >= 0,
+              label: PF.labelName(l), checked: t.labels.indexOf(l) >= 0,
               onClick: function () {
                 var ls = t.labels.slice();
                 var i = ls.indexOf(l);
@@ -192,13 +192,13 @@
           }));
         });
         labRow.appendChild(addLab);
-        var blockBtn = h("button", { class: "btn btn-ghost btn-sm", "aria-haspopup": "menu", "aria-expanded": "false" }, icon("block", 13), "Dependência");
+        var blockBtn = h("button", { class: "btn btn-ghost btn-sm", "aria-haspopup": "menu", "aria-expanded": "false" }, icon("block", 13), "Bloqueios");
         blockBtn.addEventListener("click", function () {
           var current = t.blockedBy.map(PF.task).filter(Boolean);
           var candidates = PF.projectTasks(p.id).filter(function (x) {
             return x.id !== t.id && !x.parentId && x.status !== "done" && t.blockedBy.indexOf(x.id) < 0 && !PF.wouldCycle(t.id, x.id);
           }).slice(0, 12);
-          PF.menu(blockBtn, [{ head: "Bloqueada por…" }].concat(current.concat(candidates).map(function (x) {
+          PF.menu(blockBtn, [{ head: "Esta tarefa está bloqueada por…" }].concat(current.concat(candidates).map(function (x) {
             return {
               label: x.ref + " — " + x.title.slice(0, 40), checked: t.blockedBy.indexOf(x.id) >= 0,
               sub: x.status === "done" ? "concluída — não bloqueia mais" : null,
@@ -288,7 +288,7 @@
       hist.forEach(function (a) {
         var u = PF.user(a.userId);
         body.appendChild(h("div", { class: "hist-item" },
-          h("span", { class: "src-tag " + a.source }, a.source),
+          h("span", { class: "src-tag " + a.source }, PF.sourceLabel(a.source)),
           h("span", { class: "grow" }, h("b", {}, u ? u.name : "?"), " " + a.summary),
           h("time", {}, PF.rel(a.ts))));
       });
@@ -329,7 +329,7 @@
 
     // barra de filtros criada uma única vez: digitar na busca redesenha só a tabela
     var fbar = h("div", { class: "fbar" });
-    var qIn = h("input", { class: "input search", type: "search", placeholder: "Buscar título ou identificador…", value: st.q, "aria-label": "Buscar tarefas", "data-fk": "tbl-busca" });
+    var qIn = h("input", { class: "input search", type: "search", placeholder: "Buscar por título ou ID…", value: st.q, "aria-label": "Buscar tarefas", "data-fk": "tbl-busca" });
     qIn.addEventListener("input", function () { st.q = qIn.value; st.page = 0; draw(); });
     fbar.appendChild(qIn);
     var selStatus = PF.select([{ value: "", label: "Todos os status" }].concat(PF.STATUSES.map(function (s) { return { value: s, label: PF.STATUS_META[s].label }; })), st.status, function (v) { st.status = v; st.page = 0; draw(); }, { "aria-label": "Status" });
@@ -412,10 +412,10 @@
       var tbl = h("table", { class: "tbl" },
         h("thead", {}, h("tr", {},
           h("th", { style: "width:34px" }, h("span", { style: PF.SR_STYLE }, "Tipo")),
-          th("ref", "Ref"), th("title", "Título"), th("status", "Status"),
+          th("ref", "ID"), th("title", "Título"), th("status", "Status"),
           th("priority", "Prioridade"), h("th", {}, "Responsável"),
           opts.projectId ? h("th", {}, "Sprint") : h("th", {}, "Projeto"),
-          th("due", "Vencimento"), th("updated", "Atualizada"))));
+          th("due", "Prazo"), th("updated", "Atualizada"))));
       var tb = h("tbody");
       slice.forEach(function (t) {
         var late = PF.isOverdue(t);
@@ -423,7 +423,7 @@
           h("td", {}, PF.typeIcon(t.type)),
           h("td", { class: "mono nowrap" }, t.ref),
           h("td", {}, h("div", {}, h("button", { type: "button", class: "row-link", style: PF.ROWLINK_STYLE, "data-fk": "row-" + t.id, "aria-label": t.ref + " — " + t.title }, t.title),
-            PF.isBlocked(t) ? h("span", { class: "chip warn", style: "margin-left:6px" }, "bloqueada") : null,
+            PF.isBlocked(t) ? h("span", { class: "chip warn", style: "margin-left:6px" }, "Bloqueada") : null,
             h("div", {}, t.labels.map(function (l) { var c = PF.labelChip(l); c.style.marginRight = "4px"; return c; })))),
           h("td", {}, PF.statusChip(t.status)),
           h("td", {}, PF.prioChip(t.priority)),
@@ -439,13 +439,13 @@
       var panel = h("div", { class: "panel" }, h("div", { class: "tbl-wrap" }, tbl));
       if (pages > 1) {
         panel.appendChild(h("div", { class: "pager" },
-          h("span", { class: "num" }, tasks.length + " tarefas"),
+          h("span", { class: "num" }, PF.plural(tasks.length, "tarefa", "tarefas")),
           h("span", { class: "grow" }),
           h("button", { class: "btn btn-sm", disabled: st.page === 0, onclick: function () { st.page--; draw(); } }, icon("chevL", 12), "Anterior"),
           h("span", { class: "num" }, (st.page + 1) + " / " + pages),
           h("button", { class: "btn btn-sm", disabled: st.page >= pages - 1, onclick: function () { st.page++; draw(); } }, "Próxima", icon("chevR", 12))));
       } else {
-        panel.appendChild(h("div", { class: "pager" }, h("span", { class: "num" }, tasks.length + " tarefas")));
+        panel.appendChild(h("div", { class: "pager" }, h("span", { class: "num" }, PF.plural(tasks.length, "tarefa", "tarefas"))));
       }
       holder.appendChild(panel);
     }
@@ -504,15 +504,15 @@
 
       var fbar = h("div", { class: "fbar" });
       fbar.appendChild(pick.el);
-      var qIn = h("input", { class: "input search", type: "search", placeholder: "Buscar título ou ref…", value: boardF.q, "aria-label": "Buscar no quadro", "data-fk": "board-busca" });
+      var qIn = h("input", { class: "input search", type: "search", placeholder: "Buscar por título ou ID…", value: boardF.q, "aria-label": "Buscar no quadro", "data-fk": "board-busca" });
       var deb = null;
       qIn.addEventListener("input", function () { clearTimeout(deb); deb = setTimeout(function () { boardF.q = qIn.value; PF.refresh(); }, 180); });
       fbar.appendChild(qIn);
       fbar.appendChild(PF.select([{ value: "", label: "Responsável: todos" }].concat(PF.projectMembers(p.id).map(function (u) { return { value: u.id, label: u.name }; })), boardF.assignee, function (v) { boardF.assignee = v; PF.refresh(); }, { "aria-label": "Responsável" }));
       fbar.appendChild(PF.select([{ value: "", label: "Prioridade: todas" }].concat(PF.PRIORITIES.map(function (pr) { return { value: pr, label: PF.PRIO_META[pr].label }; })), boardF.priority, function (v) { boardF.priority = v; PF.refresh(); }, { "aria-label": "Prioridade" }));
       fbar.appendChild(PF.select([{ value: "", label: "Sprint: todas" }].concat(PF.sprintsOf(p.id).map(function (s) { return { value: s.id, label: s.name }; })), boardF.sprint, function (v) { boardF.sprint = v; PF.refresh(); }, { "aria-label": "Sprint" }));
-      fbar.appendChild(PF.select([{ value: "", label: "Etiqueta: todas" }].concat(LABELS.map(function (l) { return { value: l, label: l }; })), boardF.label, function (v) { boardF.label = v; PF.refresh(); }, { "aria-label": "Etiqueta" }));
-      fbar.appendChild(PF.select([{ value: "none", label: "Ordenar: padrão" }, { value: "priority", label: "Ordenar: prioridade" }, { value: "due", label: "Ordenar: vencimento" }], boardF.group, function (v) { boardF.group = v; PF.refresh(); }, { "aria-label": "Ordenação" }));
+      fbar.appendChild(PF.select([{ value: "", label: "Etiqueta: todas" }].concat(LABELS.map(function (l) { return { value: l, label: PF.labelName(l) }; })), boardF.label, function (v) { boardF.label = v; PF.refresh(); }, { "aria-label": "Etiqueta" }));
+      fbar.appendChild(PF.select([{ value: "none", label: "Ordenar: criação" }, { value: "priority", label: "Ordenar: prioridade" }, { value: "due", label: "Ordenar: prazo" }], boardF.group, function (v) { boardF.group = v; PF.refresh(); }, { "aria-label": "Ordenação" }));
       if (boardF.q || boardF.assignee || boardF.priority || boardF.sprint || boardF.label) {
         fbar.appendChild(h("button", { class: "btn btn-ghost btn-sm", onclick: function () { boardF.q = boardF.assignee = boardF.priority = boardF.sprint = boardF.label = ""; qIn.value = ""; PF.refresh(); } }, icon("x", 12), "Limpar"));
       }
@@ -549,7 +549,7 @@
           PF.statusIcon(status),
           h("b", {}, PF.STATUS_META[status].label),
           h("span", { class: "cnt" }, String(colTasks.length)),
-          lateN ? h("span", { class: "chip danger", style: "font-size:10.5px" }, lateN + " atrasada" + (lateN > 1 ? "s" : "")) : null);
+          lateN ? h("span", { class: "chip danger", style: "font-size:10.5px" }, PF.plural(lateN, "atrasada", "atrasadas")) : null);
         if (PF.can("task.create")) {
           head.appendChild(h("button", {
             class: "btn btn-ghost btn-icon btn-sm", "aria-label": "Criação rápida em " + PF.STATUS_META[status].label,
@@ -603,8 +603,8 @@
     if (t.labels.length) card.appendChild(h("div", { style: "display:flex;gap:4px;flex-wrap:wrap;margin-bottom:7px" }, t.labels.map(PF.labelChip)));
     var due = PF.daysLeft(t.dueDate);
     card.appendChild(h("div", { class: "kc-foot" },
-      PF.isBlocked(t) ? h("span", { class: "blocked-flag" }, icon("block", 11), "bloqueada") : null,
-      t.dueDate ? h("span", { class: "due" + (PF.isOverdue(t) ? " late" : "") }, icon("timer", 11), due < 0 ? (-due) + "d atrasada" : due === 0 ? "hoje" : PF.fmtDate(t.dueDate)) : null,
+      PF.isBlocked(t) ? h("span", { class: "blocked-flag" }, icon("block", 11), "Bloqueada") : null,
+      t.dueDate ? h("span", { class: "due" + (PF.isOverdue(t) ? " late" : "") }, icon("timer", 11), due < 0 ? (-due) + "d de atraso" : due === 0 ? "Hoje" : PF.fmtDate(t.dueDate)) : null,
       subs.length ? h("span", { class: "due" }, icon("subtask", 11), subs.filter(function (s) { return s.status === "done"; }).length + "/" + subs.length) : null,
       h("span", { class: "sp" }),
       PF.avatarEl(PF.user(t.assigneeId), "sm")));
@@ -693,9 +693,9 @@
         var done = ts.filter(function (t) { return t.status === "done"; }).length;
         var pct = ts.length ? Math.round(100 * done / ts.length) : 0;
         var panel = h("div", { class: "panel", style: "margin-bottom:14px" });
-        var stChip = s.status === "active" ? h("span", { class: "chip accent" }, "ativa")
-          : s.status === "planned" ? h("span", { class: "chip" }, "planejada")
-          : h("span", { class: "chip ok" }, "concluída");
+        var stChip = s.status === "active" ? h("span", { class: "chip accent" }, "Ativa")
+          : s.status === "planned" ? h("span", { class: "chip" }, "Planejada")
+          : h("span", { class: "chip ok" }, "Concluída");
         var headActions = [];
         if (PF.can("sprint.manage")) {
           if (s.status === "planned") headActions.push(h("button", { class: "btn btn-sm btn-primary", onclick: function () { PF.act.startSprint(s.id); } }, icon("play", 12), "Iniciar sprint"));
@@ -729,7 +729,7 @@
           ts.sort(function (a, b) { return PF.STATUSES.indexOf(a.status) - PF.STATUSES.indexOf(b.status) || PF.cmp(a.ref, b.ref); }).slice(0, 8).forEach(function (t) {
             list.appendChild(PF.ui.taskRow(t));
           });
-          if (ts.length > 8) list.appendChild(h("p", { class: "subtle", style: "font-size:11.5px;padding:6px 14px" }, "+ " + (ts.length - 8) + " tarefas — veja no Kanban filtrando por esta sprint."));
+          if (ts.length > 8) list.appendChild(h("p", { class: "subtle", style: "font-size:11.5px;padding:6px 14px" }, "+ " + PF.plural(ts.length - 8, "tarefa", "tarefas") + " — veja no Kanban filtrando por esta sprint."));
           body.appendChild(list);
         } else body.appendChild(h("p", { class: "subtle", style: "font-size:12px" }, "Nenhuma tarefa associada ainda."));
         panel.appendChild(body);

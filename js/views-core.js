@@ -11,7 +11,7 @@
   var NAV_WORKSPACE = [
     { head: "Workspace" },
     { route: "dashboard", label: "Início", icon: "home" },
-    { route: "projects", label: "Meus projetos", icon: "folders" },
+    { route: "projects", label: "Projetos", icon: "folders" },
     { route: "my-tasks", label: "Minhas tarefas", icon: "tasks", cnt: function () { var me = PF.me().id; return PF.visibleTasks().filter(function (t) { return !t.parentId && t.assigneeId === me && t.status !== "done"; }).length; } },
     { route: "teams", label: "Equipes", icon: "users" },
     { head: "Projetos" },
@@ -143,7 +143,7 @@
 
     if (PF.can("user.manage")) {
       sb.appendChild(h("div", { class: "sb-footer" },
-        h("button", { class: "sb-item", onclick: PF.ui.confirmReset }, icon("refresh", 16), h("span", { class: "grow" }, "Restaurar demonstração"))
+        h("button", { class: "sb-item", onclick: PF.ui.confirmReset }, icon("refresh", 16), h("span", { class: "grow" }, "Restaurar dados da demonstração"))
       ));
     }
     return sb;
@@ -261,7 +261,7 @@
         items.push({
           icon: n.channel === "email" ? "mail" : n.channel === "sms" ? "sms" : "wapp",
           label: n.subject,
-          sub: (PF.user(n.toUserId) ? "para " + PF.user(n.toUserId).name + " · " : "") + PF.rel(n.ts) + (n.status === "failed" ? " · FALHOU" : ""),
+          sub: (PF.user(n.toUserId) ? "para " + PF.user(n.toUserId).name + " · " : "") + PF.rel(n.ts) + (n.status === "failed" ? " · falhou" : ""),
           onClick: function () { PF.navigate("/notifications"); }
         });
       });
@@ -355,8 +355,10 @@
       var actions = [];
       if (PF.can("task.create")) actions.push(h("button", { class: "btn", onclick: function () { PF.ui.taskModal(); } }, icon("plus", 14), "Nova tarefa"));
       if (PF.can("project.create")) actions.push(h("button", { class: "btn btn-primary", onclick: function () { PF.ui.projectModal(); } }, icon("plus", 14), "Novo projeto"));
-      page.appendChild(PF.ui.pageHead("Bom dia, " + me.name.split(" ")[0],
-        "Visão operacional de " + projects.length + " projeto(s) visíveis para o seu perfil.", actions));
+      var hour = new Date().getHours();
+      var greet = hour < 12 ? "Bom dia" : hour < 18 ? "Boa tarde" : "Boa noite";
+      page.appendChild(PF.ui.pageHead(greet + ", " + me.name.split(" ")[0],
+        "Visão operacional de " + PF.plural(projects.length, "projeto visível", "projetos visíveis") + " para o seu perfil.", actions));
 
       // filtros
       var fbar = h("div", { class: "fbar" });
@@ -400,11 +402,13 @@
           ctx ? h("div", { class: "ctx " + (ctxClass || "") }, ctx) : null);
         strip.appendChild(s);
       }
-      stat("Projetos ativos", activeProjects.length, projects.filter(function (p) { return PF.projectRisk(p).level === "high"; }).length + " em risco", "bad", "/projects");
-      stat("Minhas tarefas abertas", myOpen.length, myOpen.filter(PF.isOverdue).length + " atrasadas", myOpen.filter(PF.isOverdue).length ? "bad" : "", "/my-tasks");
-      stat("Tarefas atrasadas", late.length, "no recorte atual", late.length ? "bad" : "good");
-      stat("Entregas em 7 dias", next7.length, "com prazo definido");
-      stat("Concluídas no período", doneInPeriod.length, "últimos " + dashF.period + " dias", "good");
+      var riskN = projects.filter(function (p) { return PF.projectRisk(p).level === "high"; }).length;
+      var myLate = myOpen.filter(PF.isOverdue).length;
+      stat("Projetos ativos", activeProjects.length, riskN + " em risco", riskN ? "bad" : "", "/projects");
+      stat("Minhas tarefas abertas", myOpen.length, PF.plural(myLate, "atrasada", "atrasadas"), myLate ? "bad" : "", "/my-tasks");
+      stat("Tarefas atrasadas", late.length, "com os filtros atuais", late.length ? "bad" : "");
+      stat("Vencem em 7 dias", next7.length, "tarefas com prazo");
+      stat("Concluídas no período", doneInPeriod.length, "últimos " + dashF.period + " dias");
       page.appendChild(strip);
 
       var grid = h("div", { class: "grid c2-1" });
@@ -427,12 +431,12 @@
 
       // próximas entregas
       var pNext = h("div", { class: "panel" });
-      pNext.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Próximas entregas"), h("span", { class: "spacer" }),
+      pNext.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Próximos prazos"), h("span", { class: "spacer" }),
         h("span", { class: "chip" }, next7.length + " em 7 dias")));
       var nextBody = h("div", { class: "panel-body flush" });
       var upcoming = tasks.filter(function (t) { return t.status !== "done" && t.dueDate && PF.daysLeft(t.dueDate) >= -30; })
         .sort(function (a, b) { return PF.cmp(a.dueDate, b.dueDate) || PF.cmp(a.ref, b.ref); }).slice(0, 6);
-      if (!upcoming.length) nextBody.appendChild(PF.emptyState("calendar", "Sem prazos no recorte", "Defina datas de vencimento nas tarefas para acompanhá-las aqui."));
+      if (!upcoming.length) nextBody.appendChild(PF.emptyState("calendar", "Sem prazos com os filtros atuais", "Defina prazos nas tarefas para acompanhá-las aqui.", null, { compact: true }));
       else upcoming.forEach(function (t) { nextBody.appendChild(taskRow(t, true)); });
       pNext.appendChild(nextBody);
       colL.appendChild(pNext);
@@ -532,8 +536,8 @@
       PF.typeIcon(t.type),
       h("span", { class: "grow" }, t.title,
         h("span", { class: "mi-sub" }, t.ref + " · " + PF.project(t.projectId).name +
-          (withDue && t.dueDate ? " · vence " + PF.fmtDate(t.dueDate) : ""))),
-      PF.isOverdue(t) ? h("span", { class: "chip danger" }, "atrasada") : null,
+          (withDue && t.dueDate ? " · prazo " + PF.fmtDate(t.dueDate) : ""))),
+      PF.isOverdue(t) ? h("span", { class: "chip danger" }, "Atrasada") : null,
       PF.prioChip(t.priority, true),
       PF.avatarEl(PF.user(t.assigneeId), "sm"));
     return row;
@@ -584,7 +588,7 @@
             h("td", { class: "actions-col" }, h("button", { class: "btn btn-sm", onclick: function () { PF.act.unarchiveProject(p.id); } }, icon("refresh", 12), "Desarquivar"))));
         });
         holder.appendChild(h("div", { class: "panel" }, h("div", { class: "tbl-wrap" },
-          h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "Projeto"), h("th", {}, "Status"), h("th", {}, "Responsável"), h("th", {}, "Entrega"), h("th", { class: "actions-col" }, h("span", { class: "sr-only", style: SR }, "Ações")))), tb))));
+          h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "Projeto"), h("th", {}, "Status"), h("th", {}, "Responsável"), h("th", {}, "Data de entrega"), h("th", { class: "actions-col" }, h("span", { class: "sr-only", style: SR }, "Ações")))), tb))));
       }
 
       function renderList() {
@@ -603,7 +607,7 @@
           h("thead", {}, h("tr", {},
             h("th", { style: "width:30px" }), h("th", {}, "Projeto"), h("th", {}, "Status"),
             h("th", {}, "Prioridade"), h("th", {}, "Progresso"), h("th", {}, "Equipes"),
-            h("th", {}, "Responsável"), h("th", {}, "Entrega"), h("th", {}, "Risco"), h("th", { class: "actions-col" }, ""))));
+            h("th", {}, "Responsável"), h("th", {}, "Data de entrega"), h("th", {}, "Risco"), h("th", { class: "actions-col" }, h("span", { style: SR }, "Ações")))));
         var tb = h("tbody");
         list.forEach(function (p) {
           var prog = PF.projectProgress(p.id);
@@ -706,7 +710,7 @@
       PF.field("Responsável", f.lead),
       existing ? PF.field("Status", f.status) : h("span"),
       PF.field("Início", f.start),
-      PF.field("Entrega prevista", f.target),
+      PF.field("Data de entrega", f.target),
       PF.field("Descrição", f.desc, { span2: true }),
       PF.fieldGroup("Equipes associadas", h("div", {}, teamBoxes), { span2: true })
     );
@@ -767,7 +771,7 @@
     var meta = h("div", { class: "fbar", style: "gap:10px" },
       statusChipProject(p), PF.prioChip(p.priority), riskChip(risk),
       h("span", { class: "chip" }, h("span", { class: "mono" }, p.key)),
-      h("span", { class: "muted", style: "font-size:12px" }, "Início " + PF.fmtDate(p.startDate) + " · Entrega " + PF.fmtDate(p.targetDate)),
+      h("span", { class: "muted", style: "font-size:12px" }, "Início " + PF.fmtDate(p.startDate) + " · Data de entrega " + PF.fmtDate(p.targetDate)),
       h("span", { style: "display:flex;gap:8px;align-items:center" }, PF.progressBar(prog, prog === 100, "Progresso de " + p.name), h("span", { class: "num muted", style: "font-size:12px", "aria-hidden": "true" }, prog + "%")));
     page.appendChild(meta);
 
@@ -809,7 +813,7 @@
         pmB.appendChild(h("div", { class: "hist-item" },
           h("span", { style: "color:" + (m.status === "done" ? "var(--ok)" : late ? "var(--danger)" : "var(--violet)") }, icon("target", 15)),
           h("span", { class: "grow" }, m.name),
-          m.status === "done" ? h("span", { class: "chip ok" }, "entregue") : late ? h("span", { class: "chip danger" }, "atrasado") : null,
+          m.status === "done" ? h("span", { class: "chip ok" }, "Entregue") : late ? h("span", { class: "chip danger" }, "Atrasado") : null,
           h("time", {}, PF.fmtDate(m.date))));
       });
       pm.appendChild(pmB);
@@ -837,7 +841,7 @@
         var tm = PF.team(tid);
         if (!tm) return;
         var card = h("div", { class: "panel" });
-        card.appendChild(h("div", { class: "panel-head" }, h("h3", {}, tm.name), h("span", { class: "spacer" }), h("span", { class: "chip" }, tm.memberIds.length + " pessoas")));
+        card.appendChild(h("div", { class: "panel-head" }, h("h3", {}, tm.name), h("span", { class: "spacer" }), h("span", { class: "chip" }, PF.plural(tm.memberIds.length, "membro", "membros"))));
         var cb = h("div", { class: "panel-body" });
         tm.memberIds.forEach(function (uid) {
           var u = PF.user(uid);
@@ -845,7 +849,7 @@
           cb.appendChild(h("div", { class: "hist-item" },
             PF.avatarEl(u, "sm"),
             h("span", { class: "grow" }, u.name, h("span", { class: "subtle" }, " — " + u.title)),
-            tm.leadId === u.id ? h("span", { class: "chip accent" }, "líder") : null,
+            tm.leadId === u.id ? h("span", { class: "chip accent" }, "Líder") : null,
             h("span", { class: "chip" }, PF.roleName(u.roleId))));
         });
         card.appendChild(cb);
@@ -907,7 +911,7 @@
   PF.routes.teams = {
     title: "Equipes", app: "workspace",
     render: function (page) {
-      page.appendChild(PF.ui.pageHead("Equipes", "Organização, liderança e integrantes. Uma pessoa pode estar em várias equipes.",
+      page.appendChild(PF.ui.pageHead("Equipes", "Organização, liderança e membros. Uma pessoa pode estar em várias equipes.",
         PF.can("user.manage") ? h("button", { class: "btn btn-primary", onclick: teamModal }, icon("plus", 14), "Nova equipe") : null));
 
       var grid = h("div", { class: "grid c3" });
@@ -923,12 +927,12 @@
           h("p", { class: "muted", style: "font-size:12px" }, tm.desc),
           h("div", { style: "display:flex;gap:8px;align-items:center;margin-bottom:10px" },
             h("span", { class: "avatar-stack" }, tm.memberIds.slice(0, 6).map(function (uid) { return PF.avatarEl(PF.user(uid), "sm"); })),
-            h("span", { class: "subtle", style: "font-size:11.5px" }, tm.memberIds.length + " integrantes")),
+            h("span", { class: "subtle", style: "font-size:11.5px" }, PF.plural(tm.memberIds.length, "membro", "membros"))),
           h("div", { style: "display:flex;gap:12px;font-size:12px" },
             h("span", { class: "muted" }, h("b", { class: "num" }, String(open.length)), " abertas"),
             late ? h("span", { style: "color:var(--danger)" }, h("b", { class: "num" }, String(late)), " atrasadas") : null),
           h("div", { style: "margin-top:12px" },
-            h("button", { class: "btn btn-sm", onclick: function () { teamDrawer(tm.id); } }, "Gerenciar integrantes")));
+            h("button", { class: "btn btn-sm", onclick: function () { teamDrawer(tm.id); } }, "Gerenciar membros")));
         card.appendChild(body);
         grid.appendChild(card);
       });
@@ -963,16 +967,16 @@
       var tm = PF.team(teamId);
       var canManage = PF.can("user.manage") || (PF.can("team.manage") && tm.leadId === PF.me().id);
       body.appendChild(h("p", { class: "muted", style: "font-size:12px" }, tm.desc));
-      if (!canManage) body.appendChild(h("p", { class: "subtle", style: "font-size:12px" }, "O seu perfil não pode alterar os integrantes desta equipe."));
-      body.appendChild(h("div", { class: "section-h" }, "Integrantes"));
+      if (!canManage) body.appendChild(h("p", { class: "subtle", style: "font-size:12px" }, "O seu perfil não pode alterar os membros desta equipe."));
+      body.appendChild(h("div", { class: "section-h" }, "Membros"));
       PF.db.users.filter(function (u) { return !u.invited && u.orgId === tm.orgId; }).forEach(function (u) {
         var isIn = tm.memberIds.indexOf(u.id) >= 0;
         var row = h("div", { class: "hist-item" },
           PF.avatarEl(u, "sm"),
           h("span", { class: "grow" }, u.name, h("span", { class: "subtle" }, " — " + u.title)),
-          tm.leadId === u.id ? h("span", { class: "chip accent" }, "líder") : null,
-          canManage ? PF.switchEl(isIn, function () { PF.act.toggleTeamMember(tm.id, u.id); }, "Integrante " + u.name) :
-            (isIn ? h("span", { class: "chip ok" }, "integrante") : h("span", { class: "chip" }, "fora")));
+          tm.leadId === u.id ? h("span", { class: "chip accent" }, "Líder") : null,
+          canManage ? PF.switchEl(isIn, function () { PF.act.toggleTeamMember(tm.id, u.id); }, "Membro da equipe: " + u.name) :
+            (isIn ? h("span", { class: "chip ok" }, "Membro") : h("span", { class: "chip" }, "Fora da equipe")));
         body.appendChild(row);
       });
     };
@@ -993,14 +997,14 @@
       var tab = params[0] || "users";
       page.appendChild(PF.ui.pageHead("Usuários e permissões",
         "Organização → Equipe → Cargo → Papel de acesso. O papel define capacidades; o cargo descreve a função; a participação em projeto vem das equipes.",
-        PF.can("user.manage") ? h("button", { class: "btn btn-primary", onclick: inviteModal }, icon("plus", 14), "Convidar colaborador") : null));
+        PF.can("user.manage") ? h("button", { class: "btn btn-primary", onclick: inviteModal }, icon("plus", 14), "Convidar pessoa") : null));
 
       page.appendChild(PF.ui.tabNav("Seções de usuários e permissões", [["users", "Usuários"], ["roles", "Papéis e permissões"]], tab, "/access/"));
 
       if (tab === "users") {
         var tbl = h("table", { class: "tbl" },
           h("thead", {}, h("tr", {},
-            h("th", {}, "Colaborador"), h("th", {}, "Cargo"), h("th", {}, "Organização"),
+            h("th", {}, "Pessoa"), h("th", {}, "Cargo"), h("th", {}, "Organização"),
             h("th", {}, "Equipes"), h("th", {}, "Papel de acesso"), h("th", {}, "Situação"))));
         var tb = h("tbody");
         var showEmail = PF.can("user.manage");
@@ -1017,7 +1021,7 @@
             h("td", {}, org ? org.name : "—"),
             h("td", {}, u.teamIds.map(function (tid) { var tm = PF.team(tid); return tm ? h("span", { class: "chip", style: "margin-right:4px" }, tm.name) : null; })),
             h("td", {}, roleCell),
-            h("td", {}, u.invited ? h("span", { class: "chip warn" }, "convite pendente") : h("span", { class: "chip ok" }, "ativo"))));
+            h("td", {}, u.invited ? h("span", { class: "chip warn" }, "Convite pendente") : h("span", { class: "chip ok" }, "Ativo"))));
         });
         tbl.appendChild(tb);
         page.appendChild(h("div", { class: "panel" }, h("div", { class: "tbl-wrap" }, tbl)));
@@ -1077,7 +1081,7 @@
       PF.field("Papel de acesso", role, { span2: true }),
       PF.fieldGroup("Equipes", h("div", {}, teamBoxes), { span2: true }));
     PF.modal({
-      title: "Convidar colaborador", body: form,
+      title: "Convidar pessoa", body: form,
       foot: [
         h("button", { class: "btn", onclick: PF.closeOverlays }, "Cancelar"),
         h("button", { class: "btn btn-primary", onclick: function () {
@@ -1110,7 +1114,7 @@
         var pn = h("div", { class: "panel", style: "max-width:640px" });
         pn.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Organização")));
         pn.appendChild(h("div", { class: "panel-body" },
-          h("div", { class: "hist-item" }, icon("building", 15), h("span", { class: "grow" }, org.name), h("span", { class: "chip violet" }, "demonstração")),
+          h("div", { class: "hist-item" }, icon("building", 15), h("span", { class: "grow" }, org.name), h("span", { class: "chip violet" }, "Demonstração")),
           h("p", { class: "subtle", style: "font-size:12px;margin-top:8px" }, org.desc + ". Todos os registros são fictícios e vivem apenas no seu navegador.")));
         page.appendChild(pn);
 

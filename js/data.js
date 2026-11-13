@@ -286,7 +286,6 @@
     };
 
     var LABELS = ["backend", "frontend", "mobile", "infra", "dados", "ux", "seguranca", "performance", "documentacao", "cliente"];
-    var LABEL_COLORS = { backend: "#2B5FD9", frontend: "#B23A78", mobile: "#6D4FC4", infra: "#0E7490", dados: "#9A5B00", ux: "#3D7068", seguranca: "#BE3030", performance: "#7A5C2E", documentacao: "#4A6572", cliente: "#1D7A4C" };
 
     var ACCEPT_POOL = [
       "Comportamento coberto por testes automatizados",
@@ -312,8 +311,6 @@
       "Ajustei conforme a revisão, pronto para nova olhada.",
       "Bloqueada até sair a credencial do ambiente de homologação."
     ];
-
-    var STATUSES = ["backlog", "todo", "in_progress", "in_review", "done"];
 
     function teamMembers(project) {
       var ids = {};
