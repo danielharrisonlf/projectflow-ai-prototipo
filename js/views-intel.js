@@ -22,8 +22,8 @@
       page.appendChild(PF.ui.pageHead("Assistente de IA",
         "Planejamento assistido e análise dos dados do workspace. As respostas são simuladas no protótipo (serviço ms-ai no produto final), mas calculadas sobre os dados reais da demonstração."));
 
-      var panel = h("div", { class: "panel", style: "display:flex;flex-direction:column;height:calc(100vh - 230px);min-height:420px" });
-      var chat = h("div", { class: "chat panel-body", style: "flex:1;min-height:0;display:flex;flex-direction:column" });
+      var panel = h("div", { class: "panel chat-panel" });
+      var chat = h("div", { class: "chat panel-body" });
       var log = h("div", { class: "chat-log" });
       chat.appendChild(log);
 
@@ -34,7 +34,7 @@
         suggest.appendChild(h("button", { class: "btn btn-sm", onclick: function () { send(s); } }, s));
       });
 
-      var input = h("textarea", { class: "textarea", style: "min-height:40px;max-height:120px", placeholder: "Pergunte sobre os projetos ou descreva um briefing para planejar…", "aria-label": "Mensagem para o assistente" });
+      var input = h("textarea", { class: "textarea", rows: "1", placeholder: "Pergunte sobre os projetos ou descreva um briefing para planejar…", "aria-label": "Mensagem para o assistente" });
       var sendBtn = h("button", { class: "btn btn-primary", "aria-label": "Enviar" }, icon("send", 14), "Enviar");
       sendBtn.addEventListener("click", function () { if (input.value.trim()) send(input.value.trim()); });
       input.addEventListener("keydown", function (e) {
@@ -49,7 +49,7 @@
         var chatLog = myChat();
         log.replaceChildren();
         if (!chatLog.length) {
-          log.appendChild(h("div", { class: "empty", style: "margin:auto" },
+          log.appendChild(h("div", { class: "empty chat-empty" },
             h("div", { class: "e-ic" }, icon("sparkle", 20)),
             h("b", {}, "Como posso ajudar?"),
             h("p", {}, "Analiso atrasos, riscos, bloqueios e gargalos dos projetos visíveis para o seu perfil, e transformo briefings em propostas de backlog revisáveis.")));
@@ -59,8 +59,9 @@
           if (m.role === "me") msg.appendChild(h("div", { class: "bubble" }, m.text));
           else {
             var b = h("div", { class: "bubble" });
-            b.appendChild(h("div", {}, h("span", { class: "sim-badge" }, icon("sparkle", 11), "resposta simulada")));
+            b.appendChild(h("div", {}, h("span", { class: "sim-badge" }, icon("sparkle", 12), "Resposta simulada")));
             if (m.node) b.appendChild(m.node);
+            msg.appendChild(h("span", { class: "ai-av", "aria-hidden": "true" }, icon("sparkle", 14)));
             msg.appendChild(b);
           }
           log.appendChild(msg);
@@ -98,11 +99,11 @@
       var li = h("li", {},
         h("a", { href: "#", class: "mono", onclick: function (e) { e.preventDefault(); PF.ui.openTask(t.id); } }, t.ref),
         " " + t.title + " — " + PF.project(t.projectId).name);
-      if (PF.isOverdue(t)) li.appendChild(h("b", { style: "color:var(--danger)" }, " (" + (-PF.daysLeft(t.dueDate)) + "d de atraso)"));
+      if (PF.isOverdue(t)) li.appendChild(h("b", { class: "text-danger" }, " (" + (-PF.daysLeft(t.dueDate)) + "d de atraso)"));
       ul.appendChild(li);
     });
     wrap.appendChild(ul);
-    if (tasks.length > 8) wrap.appendChild(h("p", { class: "subtle", style: "font-size:12px" }, "… e mais " + (tasks.length - 8) + "."));
+    if (tasks.length > 8) wrap.appendChild(h("p", { class: "subtle t12" }, "… e mais " + (tasks.length - 8) + "."));
     return wrap;
   }
 
@@ -133,7 +134,7 @@
       });
       if (!ul.children.length) ul.appendChild(h("li", {}, "Nenhum projeto em risco relevante no momento."));
       wrap.appendChild(ul);
-      wrap.appendChild(h("p", { class: "subtle", style: "font-size:12px" }, "Detalhes em Insights → Análise de projetos."));
+      wrap.appendChild(h("p", { class: "subtle t12" }, "Detalhes em Insights → Análise de projetos."));
       return wrap;
     }
 
@@ -298,11 +299,11 @@
         "O mcp-server expõe as operações da plataforma para agentes de IA autorizados. Estado e execuções abaixo são ilustrativos, mas as ferramentas de escrita alteram de fato os dados desta demonstração."));
 
       // status do servidor
-      var strip = h("div", { class: "stat-strip", style: "margin-bottom:14px" },
-        h("div", { class: "stat" }, h("div", { class: "lbl" }, icon("plug", 13), "Servidor MCP"), h("div", { class: "val", style: "font-size:15px;color:var(--ok)" }, "Online (ilustrativo)"), h("div", { class: "ctx" }, "mcp-server v0.4.2")),
-        h("div", { class: "stat" }, h("div", { class: "lbl" }, "Endpoint"), h("div", { class: "val mono", style: "font-size:12.5px" }, "https://mcp.projectflow.local/sse"), h("div", { class: "ctx" }, "transporte SSE · autenticação por token")),
-        h("div", { class: "stat" }, h("div", { class: "lbl" }, "Ferramentas"), h("div", { class: "val" }, String(PF.db.mcpTools.length)), h("div", { class: "ctx" }, PF.db.mcpTools.filter(function (t) { return t.kind === "write"; }).length + " de escrita")),
-        h("div", { class: "stat" }, h("div", { class: "lbl" }, "Execuções registradas"), h("div", { class: "val" }, String(PF.db.mcpExecutions.length)), h("div", { class: "ctx" }, "histórico simulado")));
+      var strip = h("div", { class: "stat-strip" },
+        h("div", { class: "stat" }, h("div", { class: "lbl" }, icon("plug", 14), "Servidor MCP"), h("div", { class: "stat-row" }, h("div", { class: "val text status-ok" }, h("span", { class: "live-dot", "aria-hidden": "true" }), "Online (ilustrativo)")), h("div", { class: "ctx" }, "mcp-server v0.4.2")),
+        h("div", { class: "stat" }, h("div", { class: "lbl" }, icon("link", 14), "Endpoint"), h("div", { class: "stat-row" }, h("div", { class: "val text mono" }, "https://mcp.projectflow.local/sse")), h("div", { class: "ctx" }, "transporte SSE · autenticação por token")),
+        h("div", { class: "stat" }, h("div", { class: "lbl" }, icon("settings", 14), "Ferramentas"), h("div", { class: "stat-row" }, h("div", { class: "val" }, String(PF.db.mcpTools.length))), h("div", { class: "ctx" }, PF.db.mcpTools.filter(function (t) { return t.kind === "write"; }).length + " de escrita")),
+        h("div", { class: "stat" }, h("div", { class: "lbl" }, icon("pulse", 14), "Execuções registradas"), h("div", { class: "stat-row" }, h("div", { class: "val" }, String(PF.db.mcpExecutions.length))), h("div", { class: "ctx" }, "histórico simulado")));
       page.appendChild(strip);
 
       page.appendChild(PF.ui.tabNav("Seções de agentes MCP", [["tools", "Ferramentas"], ["test", "Testar ferramenta"], ["agents", "Agentes e integrações"], ["runs", "Histórico de execuções"]], tab, "/mcp/"));
@@ -316,8 +317,8 @@
             h("td", { class: "mono nowrap" }, t.name),
             h("td", {}, h("span", { class: "chip " + (t.kind === "write" ? "warn" : "info") }, t.kind === "write" ? "Escrita" : "Leitura")),
             h("td", {}, t.desc),
-            h("td", { class: "mono", style: "font-size:11.5px" }, t.perms),
-            h("td", { class: "mono", style: "font-size:11px;color:var(--ink-2)" }, Object.keys(t.params).map(function (k) { return k + ": " + t.params[k]; }).join("\n") || "—")));
+            h("td", { class: "mono t12" }, t.perms),
+            h("td", { class: "mono t12 muted pre" }, Object.keys(t.params).map(function (k) { return k + ": " + t.params[k]; }).join("\n") || "—")));
         });
         tbl.appendChild(tb);
         page.appendChild(h("div", { class: "panel" }, h("div", { class: "tbl-wrap" }, tbl)));
@@ -336,10 +337,9 @@
               PF.save(); PF.refresh();
             }, "Ativar " + ag.name) : h("span", { class: "chip " + (ag.active ? "ok" : "") }, ag.active ? "Ativo" : "Inativo")));
           card.appendChild(h("div", { class: "panel-body" },
-            h("span", { class: "chip violet", style: "margin-bottom:8px" }, ag.kind),
-            h("p", { class: "muted", style: "font-size:12px" }, ag.desc),
-            h("div", { class: "subtle", style: "font-size:11.5px;margin-bottom:6px" }, "Última execução " + PF.rel(ag.lastRun)),
-            h("div", {}, ag.scopes.map(function (s) { return h("span", { class: "chip", style: "margin:0 4px 4px 0;font-family:var(--mono);font-size:10.5px" }, s); }))));
+            h("div", { class: "agent-meta" }, h("span", { class: "chip violet" }, ag.kind), h("span", { class: "subtle t12" }, "Última execução " + PF.rel(ag.lastRun))),
+            h("p", { class: "muted" }, ag.desc),
+            h("div", { class: "cell-chips" }, ag.scopes.map(function (s) { return h("span", { class: "chip mono" }, s); }))));
           grid.appendChild(card);
         });
         page.appendChild(grid);
@@ -352,10 +352,10 @@
         PF.db.mcpExecutions.forEach(function (x) {
           var ag = PF.byId("mcpAgents", x.agentId);
           tb2.appendChild(h("tr", {},
-            h("td", { class: "nowrap muted", style: "font-size:11.5px" }, PF.fmtDateTime(x.ts)),
+            h("td", { class: "nowrap muted t12" }, PF.fmtDateTime(x.ts)),
             h("td", {}, ag ? ag.name : "Console de teste"),
             h("td", { class: "mono nowrap" }, x.tool),
-            h("td", { class: "mono", style: "font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, JSON.stringify(x.args)),
+            h("td", { class: "mono t12 cell-trunc", title: JSON.stringify(x.args) }, JSON.stringify(x.args)),
             h("td", {}, x.ok ? h("span", { class: "deliv-status success" }, icon("check", 13), x.summary) : h("span", { class: "deliv-status failed" }, icon("x", 13), x.summary))));
         });
         tbl2.appendChild(tb2);
@@ -392,22 +392,22 @@
       argsIn.value = testerState.args;
       descEl.textContent = PF.byId2(PF.db.mcpTools, "name", v).desc;
     });
-    var descEl = h("p", { class: "muted", style: "font-size:12px" }, PF.byId2(PF.db.mcpTools, "name", testerState.tool).desc);
-    var argsIn = h("textarea", { class: "textarea mono", style: "min-height:120px;font-size:12px", "aria-label": "Argumentos JSON" }, testerState.args);
+    var descEl = h("p", { class: "muted t12" }, PF.byId2(PF.db.mcpTools, "name", testerState.tool).desc);
+    var argsIn = h("textarea", { class: "textarea mono args-in", "aria-label": "Argumentos JSON" }, testerState.args);
     argsIn.addEventListener("input", function () { testerState.args = argsIn.value; });
     var runBtn = h("button", { class: "btn btn-primary" }, icon("play", 14), "Executar ferramenta");
     lb.appendChild(PF.field("Ferramenta", toolSel));
     lb.appendChild(descEl);
     var argsField = PF.field("Argumentos (JSON)", argsIn);
     lb.appendChild(argsField);
-    lb.appendChild(h("p", { class: "subtle", style: "font-size:11.5px" },
+    lb.appendChild(h("p", { class: "subtle t12" },
       "A execução respeita as permissões do perfil ativo (" + PF.roleName(PF.me().roleId) + "). Ferramentas de escrita alteram os dados do protótipo e registram auditoria com origem “" + PF.sourceLabel("mcp") + "”."));
     lb.appendChild(runBtn);
     left.appendChild(lb);
 
     var right = h("div", { class: "panel" });
     right.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Resposta")));
-    var out = h("pre", { class: "code", style: "min-height:200px;margin:14px" },
+    var out = h("pre", { class: "code code-out" },
       testerState.result ? JSON.stringify(testerState.result, null, 2) : "// Execute uma ferramenta para ver a resposta JSON");
     right.appendChild(out);
 
@@ -656,8 +656,10 @@
 
       if (tab === "subs") {
         if (!PF.db.webhooks.length) { page.appendChild(PF.emptyState("webhook", "Nenhuma assinatura", "Cadastre um endpoint para receber eventos da plataforma.")); return; }
+        var whStack = h("div", { class: "stack" });
+        page.appendChild(whStack);
         PF.db.webhooks.forEach(function (wh) {
-          var panel = h("div", { class: "panel", style: "margin-bottom:12px" });
+          var panel = h("div", { class: "panel" });
           var fails = PF.db.deliveries.filter(function (d) { return d.webhookId === wh.id && d.status === "failed"; }).length;
           panel.appendChild(h("div", { class: "panel-head" },
             h("h3", {}, wh.name),
@@ -674,13 +676,13 @@
               } }, icon("trash", 13))
             ] : null));
           var body = h("div", { class: "panel-body" });
-          body.appendChild(h("div", { class: "hist-item" }, icon("link", 14), h("span", { class: "mono grow", style: "font-size:12px" }, wh.url)));
+          body.appendChild(h("div", { class: "wh-url" }, icon("link", 14), h("span", { class: "mono grow break" }, wh.url)));
           // segredo
           var canSecret = PF.can("webhook.manage");
           var masked = "whsec_••••••••••••" + (canSecret ? "••••" : wh.secret.slice(-4));
-          var secretCode = h("code", { class: "code", style: "padding:4px 8px;display:inline-block" }, masked);
-          var secretBox = h("div", { class: "secret-box", style: "margin:8px 0" },
-            h("span", { class: "subtle", style: "font-size:11.5px" }, "Segredo de assinatura (HMAC):"), secretCode);
+          var secretCode = h("code", { class: "code code-inline" }, masked);
+          var secretBox = h("div", { class: "secret-box" },
+            h("span", { class: "subtle t12" }, "Segredo de assinatura (HMAC):"), secretCode);
           if (canSecret) {
             var revealed = false;
             var eyeBtn = h("button", { class: "btn btn-ghost btn-icon btn-sm", "aria-label": "Revelar segredo de " + wh.name, "aria-pressed": "false" }, icon("eye", 13));
@@ -695,10 +697,10 @@
             } }, icon("copy", 13)));
           }
           body.appendChild(secretBox);
-          body.appendChild(h("div", {}, wh.events.map(function (ev) { return h("span", { class: "chip", style: "margin:0 4px 4px 0;font-family:var(--mono);font-size:10.5px" }, ev); })));
-          if (fails) body.appendChild(h("p", { class: "subtle", style: "font-size:11.5px;margin-top:6px;color:var(--danger)" }, PF.plural(fails, "envio com falha", "envios com falha") + " — veja o histórico para reenviar."));
+          body.appendChild(h("div", { class: "cell-chips" }, wh.events.map(function (ev) { return h("span", { class: "chip mono" }, ev); })));
+          if (fails) body.appendChild(h("p", { class: "ro-note text-danger" }, icon("alert", 12), PF.plural(fails, "envio com falha", "envios com falha") + " — veja o histórico para reenviar."));
           panel.appendChild(body);
-          page.appendChild(panel);
+          whStack.appendChild(panel);
         });
       }
 
@@ -711,11 +713,11 @@
           var wh = PF.byId("webhooks", d.webhookId);
           tb.appendChild(h("tr", { class: "row-click", onclick: function () { deliveryDrawer(d.id); } },
             h("td", {}, h("span", { class: "deliv-status " + d.status }, icon(d.status === "success" ? "check" : "alert", 13), d.status === "success" ? "Entregue" : "Falhou")),
-            h("td", { class: "mono", style: "font-size:11.5px" }, h("button", { type: "button", class: "row-link", style: PF.ROWLINK_STYLE, "aria-label": "Entrega " + d.eventType + " para " + (wh ? wh.name : "assinatura removida") + ", " + (d.status === "success" ? "Entregue" : "Falhou") }, d.eventType)),
+            h("td", { class: "mono t12" }, h("button", { type: "button", class: "row-link", "aria-label": "Entrega " + d.eventType + " para " + (wh ? wh.name : "assinatura removida") + ", " + (d.status === "success" ? "Entregue" : "Falhou") }, d.eventType)),
             h("td", {}, wh ? wh.name : "—"),
             h("td", { class: "num mono" }, String(d.httpStatus)),
             h("td", { class: "num" }, String(d.attempts.length)),
-            h("td", { class: "nowrap muted", style: "font-size:11.5px" }, PF.rel(d.ts))));
+            h("td", { class: "nowrap muted t12" }, PF.rel(d.ts))));
         });
         tbl.appendChild(tb);
         page.appendChild(h("div", { class: "panel" }, h("div", { class: "tbl-wrap" }, tbl)));
@@ -734,11 +736,11 @@
         };
         EVENT_CATALOG.forEach(function (evt) {
           var n = PF.db.events.filter(function (e) { return e.type === evt; }).length;
-          tbC.appendChild(h("tr", {}, h("td", { class: "mono", style: "font-size:12px" }, evt), h("td", {}, DESC[evt]), h("td", { class: "num" }, String(n))));
+          tbC.appendChild(h("tr", {}, h("td", { class: "mono t12" }, evt), h("td", {}, DESC[evt]), h("td", { class: "num" }, String(n))));
         });
         tblC.appendChild(tbC);
         page.appendChild(h("div", { class: "panel" }, h("div", { class: "tbl-wrap" }, tblC)));
-        page.appendChild(h("p", { class: "subtle", style: "font-size:12px;margin-top:10px" },
+        page.appendChild(h("p", { class: "page-note" },
           "No produto final, os eventos saem por transactional outbox → SNS → SQS; falhas de entrega vão para a DLQ com retentativa exponencial. O protótipo simula as tentativas no histórico."));
       }
     }
@@ -752,7 +754,7 @@
       var cb = h("input", { type: "checkbox" });
       cb.checked = existing ? existing.events.indexOf(evt) >= 0 : evt === "task.status_changed.v1";
       cb.dataset.ev = evt;
-      return h("label", { class: "check" }, cb, h("span", { class: "mono", style: "font-size:12px" }, evt));
+      return h("label", { class: "check" }, cb, h("span", { class: "mono t12" }, evt));
     });
     var form = h("div", {},
       PF.field("Nome", name, { required: true }),
@@ -787,32 +789,32 @@
       body.replaceChildren();
       body.appendChild(h("div", { class: "task-props" },
         h("span", { class: "pl" }, "Status"), h("span", { class: "deliv-status " + d.status }, icon(d.status === "success" ? "check" : "alert", 13), d.status === "success" ? "Entregue" : "Falhou"),
-        h("span", { class: "pl" }, "Evento"), h("span", { class: "mono", style: "font-size:12px" }, d.eventType),
+        h("span", { class: "pl" }, "Evento"), h("span", { class: "mono t12" }, d.eventType),
         h("span", { class: "pl" }, "Assinatura"), h("span", {}, wh ? wh.name : "—"),
-        h("span", { class: "pl" }, "Endpoint"), h("span", { class: "mono", style: "font-size:11.5px;word-break:break-all" }, wh ? wh.url : "—"),
+        h("span", { class: "pl" }, "Endpoint"), h("span", { class: "mono t12 break" }, wh ? wh.url : "—"),
         h("span", { class: "pl" }, "Quando"), h("span", {}, PF.fmtDateTime(d.ts))));
 
       body.appendChild(h("div", { class: "section-h" }, "Tentativas (" + d.attempts.length + ")"));
       d.attempts.forEach(function (a, i) {
         body.appendChild(h("div", { class: "attempt-row" },
-          h("span", { class: "num", style: "width:20px;color:var(--ink-3)" }, "#" + (i + 1)),
-          h("span", { class: "mono", style: "color:" + (a.ok ? "var(--ok)" : "var(--danger)") }, "HTTP " + a.httpStatus),
+          h("span", { class: "num att-n" }, "#" + (i + 1)),
+          h("span", { class: "mono " + (a.ok ? "text-ok" : "text-danger") }, "HTTP " + a.httpStatus),
           h("span", { class: "num muted" }, a.durationMs + " ms"),
           a.manual ? h("span", { class: "chip accent" }, "Reenvio manual") : null,
           h("span", { class: "grow" }),
-          h("span", { class: "muted", style: "font-size:11px" }, PF.fmtDateTime(a.ts))));
+          h("span", { class: "muted t12" }, PF.fmtDateTime(a.ts))));
       });
       if (d.status === "failed" && PF.can("webhook.manage")) {
-        body.appendChild(wh ? h("div", { style: "margin-top:10px" },
+        body.appendChild(wh ? h("div", { class: "mt-3" },
           h("button", { class: "btn btn-primary btn-sm", onclick: function () { PF.act.redeliver(d.id); } }, icon("refresh", 13), "Reenviar evento"))
-          : h("p", { class: "subtle", style: "font-size:12px;margin-top:10px" }, "A assinatura deste envio foi excluída; não há destino para reenviar."));
+          : h("p", { class: "ro-note" }, icon("info", 12), "A assinatura deste envio foi excluída; não há destino para reenviar."));
       }
       body.appendChild(h("div", { class: "section-h" }, "Payload"));
       body.appendChild(h("pre", { class: "code" }, JSON.stringify(d.payload, null, 2)));
     };
     var dr = PF.drawer({
       label: "Envio de webhook",
-      head: h("div", { style: "display:flex;gap:8px;align-items:center" }, icon("webhook", 16), h("b", {}, "Envio de webhook")),
+      head: h("h2", { class: "drawer-title" }, icon("webhook", 16), h("b", {}, "Envio de webhook")),
       body: h("div")
     });
     PF._drawerRefresh = function () { render(dr); };
@@ -840,12 +842,12 @@
         var tb = h("tbody");
         mine.slice(0, 40).forEach(function (n) {
           tb.appendChild(h("tr", { class: "row-click", onclick: function () { notifDrawer(n.id); } },
-            h("td", {}, h("span", { style: "display:inline-flex;gap:6px;align-items:center" }, icon(CH_ICON[n.channel], 14), CH_LABEL[n.channel])),
-            h("td", {}, h("button", { type: "button", class: "row-link", style: PF.ROWLINK_STYLE }, n.subject)),
+            h("td", {}, h("span", { class: "cell-main tight" }, icon(CH_ICON[n.channel], 14), CH_LABEL[n.channel])),
+            h("td", {}, h("button", { type: "button", class: "row-link" }, n.subject)),
             h("td", {}, PF.whoCell(n.toUserId)),
             h("td", {}, n.status === "delivered" ? h("span", { class: "deliv-status success" }, icon("check", 13), "Entregue") : h("span", { class: "deliv-status failed" }, icon("alert", 13), "Falhou")),
             h("td", { class: "num" }, String(n.attempts)),
-            h("td", { class: "nowrap muted", style: "font-size:11.5px" }, PF.rel(n.ts)),
+            h("td", { class: "nowrap muted t12" }, PF.rel(n.ts)),
             h("td", { class: "actions-col" }, n.status === "failed" && PF.can("notif.manage") ? h("button", {
               class: "btn btn-sm", onclick: function (e) { e.stopPropagation(); PF.act.resendNotification(n.id); }
             }, icon("refresh", 12), "Reenviar") : null)));
@@ -856,14 +858,14 @@
 
       if (tab === "prefs") {
         var canManage = PF.can("notif.manage");
-        if (!canManage) page.appendChild(h("p", { class: "subtle", style: "font-size:12px;margin-bottom:10px" }, "Seu perfil pode visualizar, mas não alterar as preferências."));
+        if (!canManage) page.appendChild(h("p", { class: "ro-note page-lead" }, icon("block", 12), "Seu perfil pode visualizar, mas não alterar as preferências."));
         var tblP = h("table", { class: "tbl" },
           h("thead", {}, h("tr", {}, h("th", {}, "Evento"), h("th", {}, "E-mail"), h("th", {}, "WhatsApp"), h("th", {}, "SMS"))));
         var tbP = h("tbody");
         PF.db.notifTemplates.forEach(function (tpl) {
           var prefs = PF.db.notifPrefs[tpl.event] || { email: false, whatsapp: false, sms: false };
           tbP.appendChild(h("tr", {},
-            h("td", {}, h("b", {}, tpl.name), h("div", { class: "mono subtle", style: "font-size:10.5px" }, tpl.event)),
+            h("td", {}, h("b", {}, tpl.name), h("div", { class: "mono subtle t12" }, tpl.event)),
             ["email", "whatsapp", "sms"].map(function (ch) {
               return h("td", {}, canManage
                 ? PF.switchEl(prefs[ch], function (v) { PF.act.setNotifPref(tpl.event, ch, v); }, tpl.name + " via " + ch)
@@ -878,13 +880,13 @@
         var grid = h("div", { class: "grid c2" });
         PF.db.notifTemplates.forEach(function (tpl) {
           grid.appendChild(h("div", { class: "panel" },
-            h("div", { class: "panel-head" }, h("h3", {}, tpl.name), h("span", { class: "spacer" }), h("span", { class: "chip mono", style: "font-size:10.5px" }, tpl.event)),
+            h("div", { class: "panel-head" }, h("h3", {}, tpl.name), h("span", { class: "spacer" }), h("span", { class: "chip mono t12" }, tpl.event)),
             h("div", { class: "panel-body" },
-              h("div", { class: "field" }, h("label", {}, "Assunto"), h("code", { class: "code", style: "white-space:normal" }, tpl.subject)),
-              h("div", { class: "field", style: "margin-bottom:0" }, h("label", {}, "Corpo"), h("code", { class: "code", style: "white-space:normal" }, tpl.body)))));
+              h("div", { class: "field" }, h("span", { class: "fl" }, "Assunto"), h("code", { class: "code wrap" }, tpl.subject)),
+              h("div", { class: "field" }, h("span", { class: "fl" }, "Corpo"), h("code", { class: "code wrap" }, tpl.body)))));
         });
         page.appendChild(grid);
-        page.appendChild(h("p", { class: "subtle", style: "font-size:12px;margin-top:10px" }, "Variáveis entre chaves ({ref}, {nome}, {projeto}…) são substituídas no envio."));
+        page.appendChild(h("p", { class: "page-note" }, "Variáveis entre chaves ({ref}, {nome}, {projeto}…) são substituídas no envio."));
       }
 
       if (tab === "providers") {
@@ -896,9 +898,9 @@
             icon(CH_ICON[ch], 15), h("h3", {}, CH_LABEL[ch]), h("span", { class: "spacer" }),
             pv.configured ? h("span", { class: "chip ok" }, "Configurado") : h("span", { class: "chip danger" }, "Não configurado")));
           card.appendChild(h("div", { class: "panel-body" },
-            h("p", { class: "muted", style: "font-size:12px" }, pv.name),
-            pv.configured ? h("div", { class: "mono subtle", style: "font-size:11.5px" }, "remetente: " + pv.from) : h("p", { class: "subtle", style: "font-size:12px" }, "Envios por este canal falham até a configuração."),
-            PF.can("notif.manage") ? h("div", { style: "margin-top:10px" },
+            h("p", { class: "muted t12" }, pv.name),
+            pv.configured ? h("div", { class: "mono subtle t12" }, "remetente: " + pv.from) : h("p", { class: "subtle t12" }, "Envios por este canal falham até a configuração."),
+            PF.can("notif.manage") ? h("div", { class: "mt-3" },
               h("button", { class: "btn btn-sm", onclick: function () { providerModal(ch); } }, icon("settings", 12), "Configurar")) : null));
           grid2.appendChild(card);
         });
@@ -912,22 +914,22 @@
     var CH_LABEL = { email: "E-mail", whatsapp: "WhatsApp", sms: "SMS" };
     var dr = PF.drawer({
       label: "Notificação",
-      head: h("div", { style: "display:flex;gap:8px;align-items:center" }, icon("bell", 16), h("b", {}, "Notificação — " + CH_LABEL[n.channel])),
+      head: h("h2", { class: "drawer-title" }, icon("bell", 16), h("b", {}, "Notificação — " + CH_LABEL[n.channel])),
       body: h("div")
     });
     var body = dr.body;
     body.appendChild(h("div", { class: "task-props" },
       h("span", { class: "pl" }, "Status"), n.status === "delivered" ? h("span", { class: "deliv-status success" }, icon("check", 13), "Entregue") : h("span", { class: "deliv-status failed" }, icon("alert", 13), n.failReason || "Falhou"),
       h("span", { class: "pl" }, "Destinatário"), PF.whoCell(n.toUserId),
-      h("span", { class: "pl" }, "Evento"), h("span", { class: "mono", style: "font-size:11.5px" }, n.eventType),
+      h("span", { class: "pl" }, "Evento"), h("span", { class: "mono t12" }, n.eventType),
       h("span", { class: "pl" }, "Tentativas"), h("span", { class: "num" }, String(n.attempts)),
       h("span", { class: "pl" }, "Quando"), h("span", {}, PF.fmtDateTime(n.ts))));
     body.appendChild(h("div", { class: "section-h" }, "Assunto"));
     body.appendChild(h("p", {}, n.subject));
     body.appendChild(h("div", { class: "section-h" }, "Mensagem"));
-    body.appendChild(h("p", { style: "white-space:pre-wrap" }, n.body));
+    body.appendChild(h("p", { class: "pre-wrap" }, n.body));
     if (n.status === "failed" && PF.can("notif.manage")) {
-      body.appendChild(h("div", { style: "margin-top:12px" },
+      body.appendChild(h("div", { class: "mt-3" },
         h("button", { class: "btn btn-primary btn-sm", onclick: function () { PF.act.resendNotification(n.id); PF.closeOverlays(); } }, icon("refresh", 13), "Reenviar notificação")));
     }
   }
@@ -938,7 +940,7 @@
     var from = h("input", { class: "input", value: pv.from, placeholder: ch === "email" ? "noreply@empresa.dev" : "+55 11 90000-0000" });
     var host = h("input", { class: "input mono", value: pv.host, placeholder: ch === "email" ? "smtp.empresa.dev" : "api.gateway.exemplo" });
     var form = h("div", {},
-      h("p", { class: "muted", style: "font-size:12px" }, "Configuração simulada — nenhuma credencial é usada nem armazenada fora do navegador."),
+      h("p", { class: "muted t12" }, "Configuração simulada — nenhuma credencial é usada nem armazenada fora do navegador."),
       PF.field("Remetente", from, { required: true }), PF.field("Servidor / gateway", host));
     PF.modal({
       title: "Configurar " + pv.name, body: form,
