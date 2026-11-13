@@ -105,7 +105,14 @@
   /* ---------- filtros compartilhados do Insights ---------- */
   var insF = { orgId: "", projectId: "", teamId: "", period: 90 };
 
+  PF.profileHooks.push(function () {
+    insF.orgId = insF.projectId = insF.teamId = "";
+    audF.userId = audF.projectId = ""; audF.page = 0;
+  });
+
   function insFilterBar(extra) {
+    if (insF.teamId && !PF.scopeTeams().some(function (t) { return t.id === insF.teamId; })) insF.teamId = "";
+    if (insF.projectId && !PF.canSeeProject(insF.projectId)) insF.projectId = "";
     var fbar = h("div", { class: "fbar" });
     // só o administrador enxerga mais de uma organização
     if (PF.me().roleId === "admin") {
@@ -298,7 +305,7 @@
         var ts = tasks.filter(function (t) { return t.projectId === p.id; });
         var prog = PF.projectProgress(p.id);
         var lateN = ts.filter(PF.isOverdue).length;
-        var blockedN = ts.filter(function (t) { return t.blockedBy.length && t.status !== "done"; }).length;
+        var blockedN = ts.filter(PF.isBlocked).length;
         var r = onTimeRate(ts);
         tb.appendChild(h("tr", { class: "row-click", onclick: function () { PF.navigate("/projects/" + p.id); } },
           h("td", {}, h("b", {}, p.name), h("div", { class: "mono subtle", style: "font-size:10.5px" }, p.key)),
@@ -364,7 +371,7 @@
       pgB.appendChild(barList([
         { label: "Em andamento", icon: PF.statusIcon("in_progress", 13), value: wip.length },
         { label: "Em revisão", icon: PF.statusIcon("in_review", 13), value: review.length },
-        { label: "Bloqueadas", icon: h("span", { style: "color:var(--warn);display:inline-flex" }, icon("block", 13)), value: tasks.filter(function (t) { return t.blockedBy.length && t.status !== "done"; }).length }
+        { label: "Bloqueadas", icon: h("span", { style: "color:var(--warn);display:inline-flex" }, icon("block", 13)), value: tasks.filter(PF.isBlocked).length }
       ], { label: "Trabalho em progresso", labelW: 130, unit: "tarefas" }));
       var load = {};
       wip.forEach(function (t) { if (t.assigneeId) load[t.assigneeId] = (load[t.assigneeId] || 0) + 1; });
@@ -384,10 +391,10 @@
       var pd = h("div", { class: "panel" });
       pd.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Tarefas bloqueadas e dependências críticas")));
       var pdB = h("div", { class: "panel-body" });
-      var blocked = tasks.filter(function (t) { return t.blockedBy.length && t.status !== "done"; });
+      var blocked = tasks.filter(PF.isBlocked);
       if (!blocked.length) pdB.appendChild(h("p", { class: "muted" }, "Nenhum bloqueio ativo no recorte."));
       blocked.forEach(function (t) {
-        var blockers = t.blockedBy.map(function (id) { return PF.task(id); }).filter(Boolean);
+        var blockers = PF.activeBlockers(t);
         pdB.appendChild(h("div", { class: "hist-item" },
           h("span", { style: "color:var(--warn)" }, icon("block", 14)),
           h("span", { class: "grow" },
@@ -406,7 +413,7 @@
   var audF = { userId: "", projectId: "", action: "", source: "", entityType: "", period: 90, page: 0 };
   var ACTION_LABELS = {
     create: "Criação", update: "Atualização", status: "Mudança de status", priority: "Mudança de prioridade",
-    assign: "Atribuição", comment: "Comentário", block: "Bloqueio", archive: "Arquivamento", "delete": "Exclusão",
+    assign: "Atribuição", comment: "Comentário", block: "Bloqueio", unblock: "Desbloqueio", archive: "Arquivamento", unarchive: "Desarquivamento", "delete": "Exclusão",
     sprint_start: "Início de sprint", sprint_end: "Encerramento de sprint", test: "Teste de webhook",
     redeliver: "Reenvio de webhook", resend: "Reenvio de notificação", denied: "Permissão negada", ai_query: "Consulta à IA"
   };
@@ -418,6 +425,8 @@
       page.appendChild(PF.ui.pageHead("Central de auditoria",
         "Trilha completa das ações: quem fez, o quê, em qual entidade, com valores anteriores e novos, e a origem (interface, automação, API ou agente MCP)."));
 
+      if (audF.userId && !PF.scopeUsers().some(function (u) { return u.id === audF.userId; })) audF.userId = "";
+      if (audF.projectId && !PF.db.projects.some(function (p) { return p.id === audF.projectId && PF.inMyOrg(p.orgId); })) audF.projectId = "";
       var fbar = h("div", { class: "fbar" });
       fbar.appendChild(PF.select([{ value: "", label: "Todos os usuários" }].concat(PF.scopeUsers().map(function (u) { return { value: u.id, label: u.name }; })),
         audF.userId, function (v) { audF.userId = v; audF.page = 0; PF.refresh(); }, { "aria-label": "Usuário" }));
@@ -533,7 +542,8 @@
     }
 
     // evento correlacionado
-    var ev = PF.db.events.find(function (e) { return e.entityId === a.entityId && Math.abs(new Date(e.ts) - new Date(a.ts)) < 5000; });
+    var ev = a.eventId ? PF.byId("events", a.eventId)
+      : a.entityId ? PF.db.events.find(function (e) { return e.entityId === a.entityId && Math.abs(new Date(e.ts) - new Date(a.ts)) < 5000; }) : null;
     if (ev) {
       body.appendChild(h("div", { class: "section-h" }, "Evento emitido"));
       body.appendChild(h("pre", { class: "code" }, JSON.stringify({ id: ev.id, type: ev.type, occurredAt: ev.ts, data: ev.payload }, null, 2)));

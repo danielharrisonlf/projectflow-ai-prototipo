@@ -30,8 +30,11 @@
       d.setHours(hour != null ? hour : rint(8, 18), rint(0, 59), rint(0, 59), 0);
       return d.toISOString();
     }
+    // data do calendário local (não UTC): evita "um dia à frente" à noite em fusos negativos
     function dateOnly(offsetDays) {
-      return new Date(NOW + offsetDays * DAY).toISOString().slice(0, 10);
+      var d = new Date(NOW);
+      d.setDate(d.getDate() + offsetDays);
+      return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
     }
 
     var AV_COLORS = ["#2B5FD9", "#6D4FC4", "#0E7490", "#1D7A4C", "#9A5B00", "#BE3030", "#B23A78", "#4A6572", "#7A5C2E", "#3D7068"];
@@ -591,8 +594,9 @@
       { id: "mx6", ts: dIso(-9), agentId: "ag3", tool: "tasks_list", args: { sprint: "Sprint 14" }, ok: true, summary: "12 tarefas retornadas" }
     ];
 
-    audit.sort(function (a, b) { return a.ts < b.ts ? 1 : -1; });
-    events.sort(function (a, b) { return a.ts < b.ts ? 1 : -1; });
+    function byTsDesc(a, b) { return a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0; }
+    audit.sort(byTsDesc);
+    events.sort(byTsDesc);
 
     return {
       meta: { seedVersion: SEED_VERSION, seededAt: new Date(NOW).toISOString() },

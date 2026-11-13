@@ -36,6 +36,8 @@
   ];
 
   var DEMO_PROFILES = ["u1", "u2", "u4", "u8", "u18"];
+  var SR = "position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0";
+  PF.SR_STYLE = SR;
 
   function currentRoute() {
     var parts = PF.parseHash();
@@ -320,12 +322,16 @@
 
   /* ============================ DASHBOARD ============================ */
   var dashF = { period: 30, projectId: "", teamId: "", assigneeId: "" };
+  PF.profileHooks.push(function () { dashF.projectId = dashF.teamId = dashF.assigneeId = ""; projF.status = projF.status === "archived" ? "" : projF.status; });
 
   PF.routes.dashboard = {
     title: "Início", app: "workspace",
     render: function (page) {
       var me = PF.me();
       var projects = PF.visibleProjects();
+      if (dashF.projectId && !projects.some(function (p) { return p.id === dashF.projectId; })) dashF.projectId = "";
+      if (dashF.teamId && !PF.scopeTeams().some(function (t) { return t.id === dashF.teamId; })) dashF.teamId = "";
+      if (dashF.assigneeId && !PF.scopeUsers().some(function (u) { return u.id === dashF.assigneeId; })) dashF.assigneeId = "";
 
       var actions = [];
       if (PF.can("task.create")) actions.push(h("button", { class: "btn", onclick: function () { PF.ui.taskModal(); } }, icon("plus", 14), "Nova tarefa"));
@@ -394,7 +400,7 @@
         h("button", { class: "btn btn-ghost btn-sm", onclick: function () { PF.navigate("/my-tasks"); } }, "Ver todas", icon("arrowR", 12))));
       var mineList = h("div", { class: "panel-body flush" });
       if (!myOpen.length) mineList.appendChild(PF.emptyState("tasks", "Nada atribuído a você", "Tarefas atribuídas ao seu perfil aparecem aqui."));
-      else myOpen.sort(function (a, b) { return (a.dueDate || "9") < (b.dueDate || "9") ? -1 : 1; }).slice(0, 6).forEach(function (t) {
+      else myOpen.sort(function (a, b) { return PF.cmp(a.dueDate || "9", b.dueDate || "9") || PF.cmp(a.ref, b.ref); }).slice(0, 6).forEach(function (t) {
         mineList.appendChild(taskRow(t));
       });
       pMine.appendChild(mineList);
@@ -406,7 +412,7 @@
         h("span", { class: "chip" }, next7.length + " em 7 dias")));
       var nextBody = h("div", { class: "panel-body flush" });
       var upcoming = tasks.filter(function (t) { return t.status !== "done" && t.dueDate && PF.daysLeft(t.dueDate) >= -30; })
-        .sort(function (a, b) { return a.dueDate < b.dueDate ? -1 : 1; }).slice(0, 6);
+        .sort(function (a, b) { return PF.cmp(a.dueDate, b.dueDate) || PF.cmp(a.ref, b.ref); }).slice(0, 6);
       if (!upcoming.length) nextBody.appendChild(PF.emptyState("calendar", "Sem prazos no recorte", "Defina datas de vencimento nas tarefas para acompanhá-las aqui."));
       else upcoming.forEach(function (t) { nextBody.appendChild(taskRow(t, true)); });
       pNext.appendChild(nextBody);
@@ -535,14 +541,35 @@
       fbar.appendChild(PF.select([
         { value: "", label: "Todos os status" }, { value: "active", label: "Ativo" },
         { value: "paused", label: "Pausado" }, { value: "done", label: "Concluído" }
-      ], projF.status, function (v) { projF.status = v; renderList(); }, { "aria-label": "Status" }));
+      ].concat(PF.can("project.archive") ? [{ value: "archived", label: "Arquivados" }] : []), projF.status, function (v) { projF.status = v; renderList(); }, { "aria-label": "Status" }));
       page.appendChild(fbar);
 
       var holder = h("div");
       page.appendChild(holder);
 
+      function renderArchived() {
+        var q = projF.q.trim().toLowerCase();
+        var arch = PF.visibleProjects({ includeArchived: true }).filter(function (p) {
+          return p.archived && (!q || p.name.toLowerCase().indexOf(q) >= 0 || p.key.toLowerCase().indexOf(q) >= 0);
+        });
+        if (!arch.length) { holder.appendChild(PF.emptyState("archive", "Nenhum projeto arquivado", "Projetos arquivados aparecem aqui e podem ser restaurados.")); return; }
+        var tb = h("tbody");
+        arch.forEach(function (p) {
+          tb.appendChild(h("tr", {},
+            h("td", {}, h("b", {}, p.name), h("div", { class: "mono subtle" }, p.key)),
+            h("td", {}, statusChipProject(p)),
+            h("td", {}, PF.whoCell(p.leadId)),
+            h("td", { class: "nowrap" }, PF.fmtDate(p.targetDate)),
+            h("td", { class: "actions-col" }, h("button", { class: "btn btn-sm", onclick: function () { PF.act.unarchiveProject(p.id); } }, icon("refresh", 12), "Desarquivar"))));
+        });
+        holder.appendChild(h("div", { class: "panel" }, h("div", { class: "tbl-wrap" },
+          h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, h("th", {}, "Projeto"), h("th", {}, "Status"), h("th", {}, "Responsável"), h("th", {}, "Entrega"), h("th", { class: "actions-col" }, h("span", { class: "sr-only", style: SR }, "Ações")))), tb))));
+      }
+
       function renderList() {
         holder.replaceChildren();
+        var showArchived = projF.status === "archived" && PF.can("project.archive");
+        if (showArchived) return renderArchived();
         var list = PF.visibleProjects().filter(function (p) {
           if (projF.status && p.status !== projF.status) return false;
           var q = projF.q.trim().toLowerCase();
@@ -640,7 +667,7 @@
         if (existing && u.id === existing.leadId) return true;
         return !u.invited && u.orgId === projOrg && ["admin", "pm", "lead"].indexOf(u.roleId) >= 0;
       }).map(function (u) { return { value: u.id, label: u.name }; }), existing ? existing.leadId : PF.me().id),
-      start: h("input", { class: "input", type: "date", value: existing ? existing.startDate : new Date().toISOString().slice(0, 10) }),
+      start: h("input", { class: "input", type: "date", value: existing ? existing.startDate : PF.todayLocal() }),
       target: h("input", { class: "input", type: "date", value: existing && existing.targetDate ? existing.targetDate : "" }),
       status: PF.select([{ value: "active", label: "Ativo" }, { value: "paused", label: "Pausado" }, { value: "done", label: "Concluído" }], existing ? existing.status : "active")
     };
@@ -679,6 +706,7 @@
               if (!/^[A-Z]{2,4}$/.test(key)) { PF.setInvalid(f.key.closest(".field"), "Use 2 a 4 letras"); ok = false; }
               else if (PF.db.projects.some(function (p) { return p.key === key; })) { PF.setInvalid(f.key.closest(".field"), "Chave já usada por outro projeto"); ok = false; }
             }
+            if (f.start.value && f.target.value && f.target.value < f.start.value) { PF.setInvalid(f.target.closest(".field"), "A entrega não pode ser anterior ao início"); ok = false; }
             var teams = teamBoxes.filter(function (l) { return l.querySelector("input").checked; }).map(function (l) { return l.querySelector("input").dataset.team; });
             if (!ok) return;
             var fields = {
@@ -696,6 +724,11 @@
 
   function renderProjectDetail(page, id, tab) {
     var p = PF.project(id);
+    if (p && p.archived && PF.visibleProjects({ includeArchived: true }).some(function (x) { return x.id === id; })) {
+      page.appendChild(PF.emptyState("archive", "Projeto arquivado", "“" + p.name + "” está arquivado e fora das listagens ativas.",
+        PF.can("project.archive") ? h("button", { class: "btn btn-primary", onclick: function () { PF.act.unarchiveProject(p.id); } }, icon("refresh", 14), "Desarquivar") : null));
+      return;
+    }
     if (!p || !PF.canSeeProject(id)) { page.appendChild(PF.ui.noAccess("este projeto")); return; }
     tab = tab || "overview";
     var tasks = PF.projectTasks(id).filter(function (t) { return !t.parentId; });
@@ -846,7 +879,8 @@
         h("button", { class: "btn btn-primary", onclick: function () {
           PF.clearInvalid(form);
           if (!name.value.trim()) { PF.setInvalid(name.closest(".field"), "Informe o nome"); return; }
-          PF.act.createEpic(project.id, { name: name.value.trim(), desc: desc.value.trim() });
+          if (PF.epicsOf(project.id).some(function (e) { return e.name.trim().toLowerCase() === name.value.trim().toLowerCase(); })) { PF.setInvalid(name.closest(".field"), "Já existe um épico com esse nome neste projeto"); return; }
+          if (!PF.act.createEpic(project.id, { name: name.value.trim(), desc: desc.value.trim() })) return;
           PF.closeOverlays(); PF.refresh();
           PF.toast("Épico criado", name.value.trim(), "ok");
         } }, "Criar épico")
@@ -900,6 +934,7 @@
         h("button", { class: "btn btn-primary", onclick: function () {
           PF.clearInvalid(form);
           if (!name.value.trim()) { PF.setInvalid(name.closest(".field"), "Informe o nome"); return; }
+          if (PF.db.teams.some(function (t) { return t.orgId === PF.me().orgId && t.name.trim().toLowerCase() === name.value.trim().toLowerCase(); })) { PF.setInvalid(name.closest(".field"), "Já existe uma equipe com esse nome"); return; }
           PF.act.createTeam({ name: name.value.trim(), desc: desc.value.trim(), leadId: lead.value || null });
           PF.closeOverlays();
         } }, "Criar equipe")
@@ -1038,7 +1073,8 @@
           PF.clearInvalid(form);
           var ok = true;
           if (!name.value.trim() || name.value.trim().split(" ").length < 2) { PF.setInvalid(name.closest(".field"), "Informe nome e sobrenome"); ok = false; }
-          if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.value)) { PF.setInvalid(email.closest(".field"), "E-mail inválido"); ok = false; }
+          if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.value.trim())) { PF.setInvalid(email.closest(".field"), "E-mail inválido"); ok = false; }
+          else if (PF.db.users.some(function (u) { return u.email.toLowerCase() === email.value.trim().toLowerCase(); })) { PF.setInvalid(email.closest(".field"), "Já existe uma pessoa com esse e-mail"); ok = false; }
           if (!ok) return;
           PF.act.inviteUser({
             name: name.value.trim(), email: email.value.trim(), title: title.value.trim(), roleId: role.value,

@@ -50,13 +50,16 @@
 
   var MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
   PF.fmtDate = function (iso) {
-    if (!iso) return "—";
+    if (!iso || typeof iso !== "string") return "—";
+    if (iso.length === 10 && !PF.isDateOnly(iso)) return "—";
     var d = new Date(iso.length === 10 ? iso + "T12:00:00" : iso);
+    if (isNaN(d.getTime())) return "—";
     return d.getDate() + " " + MESES[d.getMonth()] + (d.getFullYear() !== new Date().getFullYear() ? " " + d.getFullYear() : "");
   };
   PF.fmtDateTime = function (iso) {
     if (!iso) return "—";
     var d = new Date(iso);
+    if (isNaN(d.getTime())) return "—";
     return PF.fmtDate(iso) + ", " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
   };
   PF.rel = function (iso) {
@@ -70,10 +73,28 @@
     if (d < 30) return "há " + d + " d";
     return PF.fmtDate(iso);
   };
-  PF.daysLeft = function (dateOnly) {
-    if (!dateOnly) return null;
-    return Math.ceil((new Date(dateOnly + "T23:59:59") - Date.now()) / 86400000);
+  /* datas "AAAA-MM-DD" são dias do calendário local (não UTC) */
+  function pad2(n) { return String(n).padStart(2, "0"); }
+  PF.ymd = function (d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); };
+  PF.todayLocal = function (offsetDays) {
+    var d = new Date();
+    if (offsetDays) d.setDate(d.getDate() + offsetDays);
+    return PF.ymd(d);
   };
+  PF.isDateOnly = function (s) {
+    if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+    var p = s.split("-").map(Number), d = new Date(p[0], p[1] - 1, p[2]);
+    return d.getFullYear() === p[0] && d.getMonth() === p[1] - 1 && d.getDate() === p[2];
+  };
+  // dias até o prazo: 0 = hoje, -1 = venceu ontem
+  PF.daysLeft = function (dateOnly) {
+    if (!PF.isDateOnly(dateOnly)) return null;
+    var p = dateOnly.split("-").map(Number);
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    return Math.round((new Date(p[0], p[1] - 1, p[2]) - today) / 86400000);
+  };
+  // comparador estável (empate = 0)
+  PF.cmp = function (a, b) { return a < b ? -1 : a > b ? 1 : 0; };
   PF.isOverdue = function (t) {
     return t.dueDate && t.status !== "done" && PF.daysLeft(t.dueDate) < 0;
   };
@@ -190,6 +211,7 @@
   };
   PF.statusIcon = function (st, size) {
     size = size || 14;
+    if (!PF.STATUS_META[st]) st = "todo";
     var c = PF.STATUS_META[st].color;
     var inner = "";
     if (st === "backlog") inner = '<circle cx="12" cy="12" r="7" stroke-dasharray="3.2 3.2"/>';
@@ -203,7 +225,8 @@
     return span;
   };
   PF.statusChip = function (st) {
-    return h("span", { class: "status-chip" }, PF.statusIcon(st), PF.STATUS_META[st].label);
+    var m = PF.STATUS_META[st] || PF.STATUS_META.todo;
+    return h("span", { class: "status-chip" }, PF.statusIcon(st), m.label);
   };
 
   PF.PRIORITIES = ["urgent", "high", "medium", "low"];
@@ -214,7 +237,7 @@
     low: { label: "Baixa", color: "var(--ink-3)", glyph: '<path d="m6 9.5 6 5 6-5"/>' }
   };
   PF.prioChip = function (p, bare) {
-    var m = PF.PRIO_META[p];
+    var m = PF.PRIO_META[p] || PF.PRIO_META.medium;
     var span = document.createElement("span");
     span.className = "prio";
     span.style.color = m.color;
@@ -254,6 +277,7 @@
     if (!u) return h("span", { class: "muted" }, "—");
     return h("span", { class: "who-cell" }, PF.avatarEl(u, "sm"), h("span", { class: "nm" }, u.name));
   };
+  PF.LABELS = ["backend", "frontend", "mobile", "infra", "dados", "ux", "seguranca", "performance", "documentacao", "cliente"];
   PF.labelChip = function (name) {
     var colors = { backend: "#2B5FD9", frontend: "#B23A78", mobile: "#6D4FC4", infra: "#0E7490", dados: "#9A5B00", ux: "#3D7068", seguranca: "#BE3030", performance: "#7A5C2E", documentacao: "#4A6572", cliente: "#1D7A4C" };
     var c = h("span", { class: "label-chip" }, name);
@@ -369,12 +393,16 @@
   PF.roleCaps = function (roleId) { return (ROLE_CAPS[roleId] || []).slice(); };
 
   /* ---------- auditoria, eventos, webhooks, notificações ---------- */
+  // o último registro recebe o id do evento emitido em seguida (correlação exata no drawer da auditoria)
+  var lastAudit = {};
   function audit(action, entityType, entityId, projectId, before, after, summary, source) {
-    PF.db.audit.unshift({
+    lastAudit = {
       id: PF.uid("au"), ts: new Date().toISOString(), userId: PF.me().id,
       action: action, entityType: entityType, entityId: entityId, projectId: projectId,
       before: before || null, after: after || null, summary: summary, source: source || "ui"
-    });
+    };
+    PF.db.audit.unshift(lastAudit);
+    return lastAudit;
   }
   PF.auditPush = audit;
 
@@ -435,6 +463,7 @@
       projectId: projectId, entityId: entityId, actorId: PF.me().id, payload: payload || {}
     };
     PF.db.events.unshift(ev);
+    if (!lastAudit.eventId && lastAudit.entityId && lastAudit.entityId === entityId) lastAudit.eventId = ev.id;
     PF.db.webhooks.forEach(function (wh) {
       if (wh.active && wh.events.indexOf(type) >= 0) deliverWebhook(wh, ev);
     });
@@ -484,13 +513,105 @@
     PF.refresh();
   };
 
+  /* ---------- validação de entrada (UI, IA e MCP passam pelas mesmas regras) ---------- */
+  PF.TASK_TYPES = ["task", "bug", "subtask"];
+  PF.PROJECT_STATUSES = ["active", "paused", "done"];
+  // campos tratados como conjunto: a ordem não é mudança
+  var SET_FIELDS = { teamIds: 1, labels: 1, blockedBy: 1, events: 1 };
+  function sameValue(k, a, b) {
+    if (SET_FIELDS[k] && Array.isArray(a) && Array.isArray(b)) {
+      return a.length === b.length && JSON.stringify(a.slice().sort()) === JSON.stringify(b.slice().sort());
+    }
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+  PF.sameValue = sameValue;
+  function strOk(v, max, required) {
+    if (v == null || v === "") return !required;
+    return typeof v === "string" && (!required || v.trim().length > 0) && v.length <= max;
+  }
+  // devolve a mensagem do primeiro problema encontrado ou null; t = tarefa atual (edição) ou null (criação)
+  PF.validateTask = function (f, projectId, t) {
+    var p = PF.project(projectId);
+    if (!p) return "Projeto não encontrado.";
+    function changed(k) { return k in f && (!t || !sameValue(k, t[k], f[k])); }
+    if ((!t || "title" in f) && !strOk(f.title, 120, true)) return "O título é obrigatório (texto de até 120 caracteres).";
+    if (changed("desc") && !strOk(f.desc, 5000)) return "A descrição deve ser texto de até 5000 caracteres.";
+    if (changed("status") && PF.STATUSES.indexOf(f.status) < 0) return "Status inválido. Use: " + PF.STATUSES.join(", ") + ".";
+    if (changed("priority") && PF.PRIORITIES.indexOf(f.priority) < 0) return "Prioridade inválida. Use: " + PF.PRIORITIES.join(", ") + ".";
+    if (changed("type") && PF.TASK_TYPES.indexOf(f.type) < 0) return "Tipo inválido. Use: task ou bug.";
+    if (changed("dueDate") && f.dueDate != null && f.dueDate !== "" && !PF.isDateOnly(f.dueDate)) return "Prazo inválido: use o formato AAAA-MM-DD.";
+    if (changed("teamId") && f.teamId && p.teamIds.indexOf(f.teamId) < 0) return "A equipe precisa estar associada ao projeto.";
+    if (changed("epicId") && f.epicId) {
+      var ep = PF.byId("epics", f.epicId);
+      if (!ep || ep.projectId !== p.id) return "O épico precisa ser do mesmo projeto.";
+    }
+    if (changed("sprintId") && f.sprintId) {
+      var sp = PF.byId("sprints", f.sprintId);
+      if (!sp || sp.projectId !== p.id) return "A sprint precisa ser do mesmo projeto.";
+      if (sp.status === "done") return "A " + sp.name + " já foi encerrada; escolha uma sprint ativa ou planejada.";
+    }
+    if (changed("assigneeId") && f.assigneeId && !PF.projectMembers(p.id).some(function (u) { return u.id === f.assigneeId; })) {
+      return "O responsável precisa ser membro ativo das equipes do projeto.";
+    }
+    if (changed("labels") && (!Array.isArray(f.labels) || f.labels.some(function (l) { return PF.LABELS.indexOf(l) < 0; }))) return "Etiqueta desconhecida.";
+    if (changed("acceptance") && (!Array.isArray(f.acceptance) || f.acceptance.some(function (a) { return !a || !strOk(a.text, 300, true); }))) return "Critérios de aceite inválidos.";
+    if (changed("blockedBy")) {
+      if (!Array.isArray(f.blockedBy)) return "Dependências inválidas.";
+      for (var i = 0; i < f.blockedBy.length; i++) {
+        var bid = f.blockedBy[i], b = PF.task(bid);
+        if (t && t.blockedBy.indexOf(bid) >= 0) continue; // já existentes não são revalidadas
+        if (!b || b.projectId !== p.id) return "A tarefa bloqueadora precisa ser do mesmo projeto.";
+        if (t && (bid === t.id || PF.wouldCycle(t.id, bid))) return b.ref + " já depende de " + t.ref + " — a dependência seria circular.";
+      }
+    }
+    return null;
+  };
+  PF.validateProject = function (f, existing) {
+    if ((!existing || "name" in f) && !strOk(f.name, 80, true)) return "O nome do projeto é obrigatório (até 80 caracteres).";
+    if (!existing && !/^[A-Z]{2,4}$/.test(String(f.key || "").toUpperCase())) return "A chave deve ter de 2 a 4 letras (ex.: PCL).";
+    if ("desc" in f && !strOk(f.desc, 2000)) return "A descrição deve ser texto de até 2000 caracteres.";
+    if ("priority" in f && f.priority != null && PF.PRIORITIES.indexOf(f.priority) < 0) return "Prioridade inválida.";
+    if ("status" in f && f.status != null && PF.PROJECT_STATUSES.indexOf(f.status) < 0) return "Status de projeto inválido.";
+    var start = "startDate" in f ? f.startDate : existing && existing.startDate;
+    var target = "targetDate" in f ? f.targetDate : existing && existing.targetDate;
+    if (start && !PF.isDateOnly(start)) return "Data de início inválida.";
+    if (target && !PF.isDateOnly(target)) return "Data de entrega inválida.";
+    if (start && target && target < start) return "A data de entrega não pode ser anterior ao início.";
+    return null;
+  };
+  function invalid(msg) { PF.toast("Dados inválidos", msg, "err"); }
+
+  /* ---------- dependências entre tarefas ---------- */
+  // bloqueio só conta enquanto a tarefa bloqueadora existe e não foi concluída
+  PF.activeBlockers = function (t) {
+    return (t.blockedBy || []).map(PF.task).filter(function (b) { return b && b.status !== "done"; });
+  };
+  PF.isBlocked = function (t) { return t.status !== "done" && PF.activeBlockers(t).length > 0; };
+  // blockerId já depende (direta ou indiretamente) de taskId?
+  PF.wouldCycle = function (taskId, blockerId) {
+    var seen = {}, stack = [blockerId];
+    while (stack.length) {
+      var id = stack.pop();
+      if (id === taskId) return true;
+      if (seen[id]) continue;
+      seen[id] = 1;
+      var x = PF.task(id);
+      if (x) stack.push.apply(stack, x.blockedBy || []);
+    }
+    return false;
+  };
+
   act.createProject = function (f) {
-    if (!PF.guard("project.create", "criar projetos")) return null;
+    if (!PF.guard("project.create", "criar projetos", f.source)) return null;
+    var err = PF.validateProject(f, null);
+    if (err) { invalid(err); return null; }
+    var key = String(f.key).toUpperCase();
+    if (PF.db.projects.some(function (x) { return x.key === key; })) { invalid("A chave " + key + " já é usada por outro projeto."); return null; }
     var p = {
-      id: PF.uid("prj"), orgId: PF.me().orgId, key: f.key.toUpperCase(), name: f.name, desc: f.desc || "",
+      id: PF.uid("prj"), orgId: PF.me().orgId, key: key, name: f.name.trim(), desc: f.desc || "",
       teamIds: f.teamIds || [], leadId: f.leadId || PF.me().id, priority: f.priority || "medium",
-      status: "active", startDate: f.startDate || new Date().toISOString().slice(0, 10),
-      targetDate: f.targetDate || null, favorite: false, archived: false,
+      status: "active", startDate: f.startDate || PF.todayLocal(),
+      targetDate: f.targetDate || null, archived: false,
       createdAt: new Date().toISOString(), color: "#2B5FD9"
     };
     PF.db.projects.push(p);
@@ -506,9 +627,11 @@
     if (!PF.guard("project.edit", "editar projetos", source)) return;
     var p = PF.project(id);
     if (!p || !PF.canSeeProject(id)) { PF.deny("editar este projeto", source); return; }
+    var err = PF.validateProject(fields, p);
+    if (err) { invalid(err); return; }
     var before = {}, after = {};
     Object.keys(fields).forEach(function (k) {
-      if (JSON.stringify(p[k]) !== JSON.stringify(fields[k])) { before[k] = p[k]; after[k] = fields[k]; p[k] = fields[k]; }
+      if (!sameValue(k, p[k], fields[k])) { before[k] = p[k]; after[k] = fields[k]; p[k] = fields[k]; }
     });
     if (!Object.keys(after).length) return;
     audit("update", "project", p.id, p.id, before, after, "atualizou o projeto " + p.name, source || "ui");
@@ -523,16 +646,41 @@
     if (!p || !PF.canSeeProject(id)) { PF.deny("arquivar este projeto"); return; }
     p.archived = true;
     audit("archive", "project", p.id, p.id, { archived: false }, { archived: true }, "arquivou o projeto " + p.name, "ui");
+    PF.emitEvent("project.archived.v1", p.id, p.id, { project: p.name, key: p.key });
+    PF.save();
+    // o detalhe do projeto arquivado não está mais nas listagens: volta para a lista
+    if (PF.parseHash()[0] === "projects" && PF.parseHash()[1] === id) PF.navigate("/projects"); else PF.refresh();
+    PF.toast("Projeto arquivado", p.name + " saiu das listagens ativas. Para restaurar, filtre por “Arquivados” em Projetos.", "ok");
+  };
+
+  act.unarchiveProject = function (id) {
+    if (!PF.guard("project.archive", "desarquivar projetos")) return;
+    var p = PF.project(id);
+    if (!p || !p.archived || !PF.visibleProjects({ includeArchived: true }).some(function (x) { return x.id === id; })) { PF.deny("desarquivar este projeto"); return; }
+    p.archived = false;
+    audit("unarchive", "project", p.id, p.id, { archived: true }, { archived: false }, "desarquivou o projeto " + p.name, "ui");
+    PF.emitEvent("project.unarchived.v1", p.id, p.id, { project: p.name, key: p.key });
     PF.save(); PF.refresh();
-    PF.toast("Projeto arquivado", p.name + " saiu das listagens ativas.", "ok");
+    PF.toast("Projeto restaurado", p.name + " voltou às listagens ativas.", "ok");
   };
 
   act.deleteProject = function (id) {
     if (!PF.guard("project.delete", "excluir projetos")) return;
     var p = PF.project(id);
     if (!p || !PF.visibleProjects({ includeArchived: true }).some(function (x) { return x.id === id; })) { PF.deny("excluir este projeto"); return; }
+    var taskIds = {};
+    PF.db.tasks.forEach(function (t) { if (t.projectId === id) taskIds[t.id] = 1; });
     PF.db.projects = PF.db.projects.filter(function (x) { return x.id !== id; });
     PF.db.tasks = PF.db.tasks.filter(function (t) { return t.projectId !== id; });
+    // nada órfão: épicos, sprints, marcos, comentários e referências de favoritos/bloqueios
+    PF.db.epics = PF.db.epics.filter(function (x) { return x.projectId !== id; });
+    PF.db.sprints = PF.db.sprints.filter(function (x) { return x.projectId !== id; });
+    PF.db.milestones = PF.db.milestones.filter(function (x) { return x.projectId !== id; });
+    PF.db.comments = PF.db.comments.filter(function (c) { return !taskIds[c.taskId]; });
+    PF.db.tasks.forEach(function (t) { if (t.blockedBy.some(function (b) { return taskIds[b]; })) t.blockedBy = t.blockedBy.filter(function (b) { return !taskIds[b]; }); });
+    PF.db.users.forEach(function (u) { if (u.favoriteProjectIds) u.favoriteProjectIds = u.favoriteProjectIds.filter(function (x) { return x !== id; }); });
+    delete PF.db.taskCounters[id];
+    if (PF.db.settings.currentProjectId === id) PF.db.settings.currentProjectId = null;
     audit("delete", "project", id, id, { name: p.name }, null, "excluiu o projeto " + p.name + " (simulado)", "ui");
     PF.save();
     PF.navigate("/projects");
@@ -557,7 +705,8 @@
   act.createEpic = function (projectId, f, source) {
     if (!PF.guard("task.create", "criar épicos", source)) return null;
     if (!PF.project(projectId) || !PF.canSeeProject(projectId)) { PF.deny("criar épicos neste projeto", source); return null; }
-    var ep = { id: PF.uid("ep"), projectId: projectId, name: f.name, desc: f.desc || "", status: "active", ownerId: f.ownerId || PF.me().id };
+    if (!strOk(f.name, 70, true)) { invalid("O nome do épico é obrigatório (até 70 caracteres)."); return null; }
+    var ep = { id: PF.uid("ep"), projectId: projectId, name: f.name.trim(), desc: f.desc || "", status: "active", ownerId: f.ownerId || PF.me().id };
     PF.db.epics.push(ep);
     audit("create", "epic", ep.id, projectId, null, { name: ep.name }, "criou o épico " + ep.name, source || "ui");
     PF.save();
@@ -576,16 +725,20 @@
     if (!PF.guard("task.create", "criar tarefas", source)) return null;
     if (!PF.canSeeProject(f.projectId)) { PF.deny("criar tarefas neste projeto", source); return null; }
     if (f.assigneeId && !assignAllowed(null, f.assigneeId)) { PF.deny("atribuir tarefas a outras pessoas", source); return null; }
+    var err = PF.validateTask(f, f.projectId, null);
+    if (!err && f.parentId) { var par = PF.task(f.parentId); if (!par || par.projectId !== f.projectId) err = "A tarefa-mãe precisa ser do mesmo projeto."; }
+    if (err) { invalid(err); return null; }
     var p = PF.project(f.projectId);
     PF.db.taskCounters[p.id] = (PF.db.taskCounters[p.id] || 0) + 1;
+    var now = new Date().toISOString();
     var t = {
       id: PF.uid("tsk"), ref: p.key + "-" + (100 + PF.db.taskCounters[p.id]),
       projectId: p.id, epicId: f.epicId || null, parentId: f.parentId || null,
-      type: f.type || "task", title: f.title, desc: f.desc || "",
+      type: f.type || "task", title: f.title.trim(), desc: f.desc || "",
       status: f.status || "todo", priority: f.priority || "medium",
       assigneeId: f.assigneeId || null, teamId: f.teamId || p.teamIds[0] || null,
       sprintId: f.sprintId || null, labels: f.labels || [], acceptance: f.acceptance || [],
-      blockedBy: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      blockedBy: [], createdAt: now, updatedAt: now,
       dueDate: f.dueDate || null, createdBy: PF.me().id
     };
     PF.db.tasks.push(t);
@@ -600,19 +753,22 @@
     return t;
   };
 
+  // devolve true quando algo foi gravado
   act.updateTask = function (id, fields, source) {
     var t = PF.task(id);
-    if (!t) return;
-    if (!PF.canTouchTask(t)) { PF.deny("editar a tarefa " + t.ref, source); return; }
+    if (!t) return false;
+    if (!PF.canTouchTask(t)) { PF.deny("editar a tarefa " + t.ref, source); return false; }
     if ("assigneeId" in fields && (fields.assigneeId || null) !== (t.assigneeId || null) && !assignAllowed(t.assigneeId, fields.assigneeId)) {
-      PF.deny("atribuir tarefas a outras pessoas", source); return;
+      PF.deny("atribuir tarefas a outras pessoas", source); return false;
     }
+    var err = PF.validateTask(fields, t.projectId, t);
+    if (err) { invalid(err); return false; }
     var p = PF.project(t.projectId);
     var before = {}, after = {};
     Object.keys(fields).forEach(function (k) {
-      if (JSON.stringify(t[k]) !== JSON.stringify(fields[k])) { before[k] = t[k]; after[k] = fields[k]; t[k] = fields[k]; }
+      if (!sameValue(k, t[k], fields[k])) { before[k] = t[k]; after[k] = fields[k]; t[k] = fields[k]; }
     });
-    if (!Object.keys(after).length) return;
+    if (!Object.keys(after).length) return false;
     t.updatedAt = new Date().toISOString();
 
     if ("status" in after) {
@@ -629,11 +785,17 @@
         PF.emitEvent("task.assigned.v1", t.projectId, t.id, { task: t.ref, assignee: after.assigneeId, vars: { ref: t.ref, nome: u.name.split(" ")[0], titulo: t.title, projeto: p.name } });
       }
     }
-    if ("blockedBy" in after && after.blockedBy.length > (before.blockedBy || []).length) {
-      var blockerId = after.blockedBy[after.blockedBy.length - 1];
-      var blocker = PF.task(blockerId);
-      audit("block", "task", t.id, t.projectId, null, { blockedBy: blockerId }, t.ref + " bloqueada por " + (blocker ? blocker.ref : "?"), source || "ui");
-      PF.emitEvent("task.blocked.v1", t.projectId, t.id, { task: t.ref, assignee: t.assigneeId, vars: { ref: t.ref, bloqueio: blocker ? blocker.ref : "?" } });
+    if ("blockedBy" in after) {
+      var prev = before.blockedBy || [];
+      after.blockedBy.filter(function (b) { return prev.indexOf(b) < 0; }).forEach(function (blockerId) {
+        var blocker = PF.task(blockerId);
+        audit("block", "task", t.id, t.projectId, null, { blockedBy: blockerId }, t.ref + " bloqueada por " + (blocker ? blocker.ref : "?"), source || "ui");
+        PF.emitEvent("task.blocked.v1", t.projectId, t.id, { task: t.ref, assignee: t.assigneeId, vars: { ref: t.ref, bloqueio: blocker ? blocker.ref : "?" } });
+      });
+      prev.filter(function (b) { return after.blockedBy.indexOf(b) < 0; }).forEach(function (blockerId) {
+        var blocker = PF.task(blockerId);
+        audit("unblock", "task", t.id, t.projectId, { blockedBy: blockerId }, null, t.ref + " deixou de depender de " + (blocker ? blocker.ref : "tarefa removida"), source || "ui");
+      });
     }
     var other = Object.keys(after).filter(function (k) { return ["status", "assigneeId", "blockedBy"].indexOf(k) < 0; });
     if (other.length) {
@@ -642,11 +804,12 @@
       audit(other.indexOf("priority") >= 0 ? "priority" : "update", "task", t.id, t.projectId, ob, oa, "atualizou " + t.ref + " (" + other.join(", ") + ")", source || "ui");
     }
     PF.save(); PF.refresh();
+    return true;
   };
 
   act.moveTask = function (id, status, source) {
-    if (!PF.guard("task.move", "mover tarefas", source)) return;
-    act.updateTask(id, { status: status }, source);
+    if (!PF.guard("task.move", "mover tarefas", source)) return false;
+    return act.updateTask(id, { status: status }, source);
   };
 
   act.deleteTask = function (id, source) {
@@ -654,15 +817,27 @@
     if (!t) return;
     if (!PF.guard("task.delete", "excluir tarefas", source)) return;
     if (!PF.canSeeProject(t.projectId)) { PF.deny("excluir a tarefa " + t.ref, source); return; }
-    PF.db.tasks = PF.db.tasks.filter(function (x) { return x.id !== id && x.parentId !== id; });
-    audit("delete", "task", id, t.projectId, { title: t.title }, null, "excluiu a tarefa " + t.ref + " (simulado)", "ui");
+    var gone = {};
+    PF.db.tasks.forEach(function (x) { if (x.id === id || x.parentId === id) gone[x.id] = 1; });
+    PF.db.tasks = PF.db.tasks.filter(function (x) { return !gone[x.id]; });
+    // dependentes deixam de apontar para a tarefa excluída; comentários dela saem junto
+    PF.db.tasks.forEach(function (x) {
+      if (x.blockedBy.some(function (b) { return gone[b]; })) {
+        x.blockedBy = x.blockedBy.filter(function (b) { return !gone[b]; });
+        audit("unblock", "task", x.id, x.projectId, { blockedBy: id }, null, x.ref + " deixou de depender de " + t.ref + " (excluída)", source || "ui");
+      }
+    });
+    PF.db.comments = PF.db.comments.filter(function (c) { return !gone[c.taskId]; });
+    audit("delete", "task", id, t.projectId, { title: t.title }, null, "excluiu a tarefa " + t.ref + " (simulado)", source || "ui");
     PF.save(); PF.refresh();
     PF.toast("Tarefa excluída", t.ref + " removida (simulação).", "ok");
   };
 
   act.addComment = function (taskId, text) {
     var t = PF.task(taskId);
+    if (!t) return;
     if (!PF.canSeeProject(t.projectId) || !PF.can("task.create")) { PF.deny("comentar nesta tarefa"); return; }
+    if (!strOk(text, 4000, true)) { invalid("O comentário deve ter até 4000 caracteres."); return; }
     var c = { id: PF.uid("cm"), taskId: taskId, userId: PF.me().id, text: text, createdAt: new Date().toISOString() };
     PF.db.comments.push(c);
     audit("comment", "task", t.id, t.projectId, null, null, "comentou em " + t.ref, "ui");
@@ -678,7 +853,10 @@
   act.createSprint = function (projectId, f) {
     if (!PF.guard("sprint.manage", "criar sprints")) return null;
     if (!PF.canSeeProject(projectId)) { PF.deny("criar sprints neste projeto"); return null; }
-    var s = { id: PF.uid("sp"), projectId: projectId, name: f.name, goal: f.goal || "", status: "planned", startDate: f.startDate, endDate: f.endDate };
+    if (!strOk(f.name, 40, true)) { invalid("O nome da sprint é obrigatório."); return null; }
+    if (!PF.isDateOnly(f.startDate) || !PF.isDateOnly(f.endDate) || f.endDate <= f.startDate) { invalid("O término da sprint deve ser depois do início."); return null; }
+    if (PF.sprintsOf(projectId).some(function (x) { return x.name.trim().toLowerCase() === f.name.trim().toLowerCase(); })) { invalid("Já existe uma sprint com esse nome neste projeto."); return null; }
+    var s = { id: PF.uid("sp"), projectId: projectId, name: f.name.trim(), goal: f.goal || "", status: "planned", startDate: f.startDate, endDate: f.endDate };
     PF.db.sprints.push(s);
     audit("create", "sprint", s.id, projectId, null, { name: s.name }, "criou a " + s.name, "ui");
     PF.save(); PF.refresh();
@@ -690,8 +868,13 @@
     if (!PF.guard("sprint.manage", "iniciar sprints")) return;
     var s = PF.byId("sprints", id);
     if (!s || !PF.canSeeProject(s.projectId)) { PF.deny("iniciar esta sprint"); return; }
+    if (s.status !== "planned") { PF.toast("Sprint não pode ser iniciada", "Só sprints planejadas podem ser iniciadas.", "warn"); return; }
+    // uma sprint ativa por projeto
+    var running = PF.sprintsOf(s.projectId).filter(function (x) { return x.status === "active"; })[0];
+    if (running) { PF.toast("Já existe uma sprint ativa", "Encerre a " + running.name + " antes de iniciar a " + s.name + ".", "warn"); return; }
+    var prevStatus = s.status;
     s.status = "active";
-    audit("sprint_start", "sprint", s.id, s.projectId, { status: "planned" }, { status: "active" }, "iniciou a " + s.name, "ui");
+    audit("sprint_start", "sprint", s.id, s.projectId, { status: prevStatus }, { status: "active" }, "iniciou a " + s.name, "ui");
     PF.emitEvent("sprint.started.v1", s.projectId, s.id, { sprint: s.name, vars: { sprint: s.name, projeto: PF.project(s.projectId).name, meta: s.goal } });
     PF.save(); PF.refresh();
     PF.toast("Sprint iniciada", s.name, "ok");
@@ -701,23 +884,28 @@
     if (!PF.guard("sprint.manage", "encerrar sprints")) return;
     var s = PF.byId("sprints", id);
     if (!s || !PF.canSeeProject(s.projectId)) { PF.deny("encerrar esta sprint"); return; }
+    if (s.status !== "active") { PF.toast("Sprint não pode ser encerrada", "Só a sprint ativa pode ser encerrada.", "warn"); return; }
+    var prevStatus = s.status;
     s.status = "done";
     var done = PF.db.tasks.filter(function (t) { return t.sprintId === id && t.status === "done"; }).length;
     var open = PF.db.tasks.filter(function (t) { return t.sprintId === id && t.status !== "done"; });
     open.forEach(function (t) { t.sprintId = null; }); // volta para o backlog da lista
-    audit("sprint_end", "sprint", s.id, s.projectId, { status: "active" }, { status: "done" },
+    audit("sprint_end", "sprint", s.id, s.projectId, { status: prevStatus }, { status: "done" },
       "encerrou a " + s.name + " (" + done + " concluídas, " + open.length + " devolvidas ao backlog)", "ui");
     PF.emitEvent("sprint.completed.v1", s.projectId, s.id, { sprint: s.name, done: done, vars: { sprint: s.name, feitas: String(done) } });
     PF.save(); PF.refresh();
     PF.toast("Sprint encerrada", s.name + ": " + done + " tarefas concluídas; " + open.length + " voltaram ao backlog.", "ok");
   };
 
+  // endpoints simulados com falha (mesma regra da dica do formulário e do README)
+  PF.FAILING_URL_RE = /fail|erro|500|503|\.local\b/i;
+
   act.createWebhook = function (f) {
     if (!PF.guard("webhook.manage", "gerenciar webhooks")) return null;
     var wh = {
       id: PF.uid("wh"), name: f.name, url: f.url,
       secret: "whsec_" + Math.random().toString(16).slice(2, 10) + Math.random().toString(16).slice(2, 10),
-      events: f.events, active: true, health: /fail|erro|500|503/.test(f.url) ? "failing" : "ok",
+      events: f.events, active: true, health: PF.FAILING_URL_RE.test(f.url) ? "failing" : "ok",
       createdAt: new Date().toISOString()
     };
     PF.db.webhooks.push(wh);
@@ -730,11 +918,12 @@
   act.updateWebhook = function (id, fields) {
     if (!PF.guard("webhook.manage", "gerenciar webhooks")) return;
     var wh = PF.byId("webhooks", id);
+    if (!wh) return;
     var before = {}, after = {};
     Object.keys(fields).forEach(function (k) {
-      if (JSON.stringify(wh[k]) !== JSON.stringify(fields[k])) { before[k] = wh[k]; after[k] = fields[k]; wh[k] = fields[k]; }
+      if (!sameValue(k, wh[k], fields[k])) { before[k] = wh[k]; after[k] = fields[k]; wh[k] = fields[k]; }
     });
-    if ("url" in after) wh.health = /fail|erro|500|503/.test(wh.url) ? "failing" : "ok";
+    if ("url" in after) wh.health = PF.FAILING_URL_RE.test(wh.url) ? "failing" : "ok";
     if (Object.keys(after).length) audit("update", "webhook", wh.id, null, before, after, "atualizou o webhook " + wh.name, "ui");
     PF.save(); PF.refresh();
   };
@@ -742,6 +931,7 @@
   act.deleteWebhook = function (id) {
     if (!PF.guard("webhook.manage", "gerenciar webhooks")) return;
     var wh = PF.byId("webhooks", id);
+    if (!wh) return;
     PF.db.webhooks = PF.db.webhooks.filter(function (x) { return x.id !== id; });
     audit("delete", "webhook", id, null, { name: wh.name }, null, "excluiu o webhook " + wh.name, "ui");
     PF.save(); PF.refresh();
@@ -751,10 +941,13 @@
   act.testWebhook = function (id) {
     if (!PF.guard("webhook.manage", "testar webhooks")) return;
     var wh = PF.byId("webhooks", id);
+    if (!wh) return;
+    if (!wh.active) { PF.toast("Assinatura inativa", "Ative “" + wh.name + "” para enviar um teste.", "warn"); return; }
     var ev = { id: PF.uid("ev"), ts: new Date().toISOString(), type: "ping.v1", projectId: null, entityId: null, actorId: PF.me().id, payload: { message: "Teste manual disparado por " + PF.me().name } };
     PF.db.events.unshift(ev);
-    deliverWebhook(wh, ev);
     audit("test", "webhook", wh.id, null, null, null, "testou o webhook " + wh.name, "ui");
+    lastAudit.eventId = ev.id;
+    deliverWebhook(wh, ev);
     PF.save(); PF.refresh();
     if (wh.health !== "failing") PF.toast("Teste enviado", wh.name + " respondeu 200 OK.", "ok");
   };
@@ -762,7 +955,9 @@
   act.redeliver = function (deliveryId) {
     if (!PF.guard("webhook.manage", "reenviar entregas")) return;
     var dl = PF.byId("deliveries", deliveryId);
-    var wh = PF.byId("webhooks", dl.webhookId);
+    var wh = dl && PF.byId("webhooks", dl.webhookId);
+    // assinatura excluída: nada é alterado
+    if (!dl || !wh) { PF.toast("Assinatura removida", "A assinatura desta entrega foi excluída; não há destino para reenviar.", "warn"); return; }
     dl.attempts.push({ ts: new Date().toISOString(), httpStatus: 200, ok: true, durationMs: 120 + Math.floor(Math.random() * 200), manual: true });
     dl.status = "success"; dl.httpStatus = 200;
     audit("redeliver", "webhook", wh.id, null, null, null, "reenviou manualmente o evento " + dl.eventType + " para " + wh.name, "ui");
@@ -1349,7 +1544,7 @@
   PF.projectRisk = function (p) {
     var ts = PF.projectTasks(p.id).filter(function (t) { return !t.parentId; });
     var late = ts.filter(PF.isOverdue).length;
-    var blocked = ts.filter(function (t) { return t.blockedBy.length && t.status !== "done"; }).length;
+    var blocked = ts.filter(PF.isBlocked).length;
     var target = p.targetDate ? PF.daysLeft(p.targetDate) : 99;
     var prog = PF.projectProgress(p.id);
     if (p.status === "done") return { level: "ok", label: "Entregue" };

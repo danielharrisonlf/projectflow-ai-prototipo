@@ -6,7 +6,7 @@
   var h = PF.h, icon = PF.icon;
 
   var EVENT_CATALOG = [
-    "project.created.v1", "project.updated.v1",
+    "project.created.v1", "project.updated.v1", "project.archived.v1", "project.unarchived.v1",
     "task.created.v1", "task.assigned.v1", "task.status_changed.v1", "task.completed.v1",
     "sprint.started.v1", "sprint.completed.v1"
   ];
@@ -108,8 +108,12 @@
     var q = text.toLowerCase();
     var tasks = PF.visibleTasks().filter(function (t) { return !t.parentId; });
 
+    if (/^\s*(planejar|planeje|planejamento|briefing)\b/.test(q) || /\bplanej|\bbriefing|\bproposta de backlog/.test(q)) {
+      return buildProposal(text);
+    }
+
     if (/atrasad/.test(q)) {
-      var late = tasks.filter(PF.isOverdue).sort(function (a, b) { return a.dueDate < b.dueDate ? -1 : 1; });
+      var late = tasks.filter(PF.isOverdue).sort(function (a, b) { return PF.cmp(a.dueDate, b.dueDate) || PF.cmp(a.ref, b.ref); });
       if (!late.length) return h("div", {}, h("p", {}, "Nenhuma tarefa atrasada nos projetos visíveis. Bom sinal."));
       return aiTaskList(late, "Encontrei " + late.length + " tarefa(s) atrasada(s):");
     }
@@ -132,12 +136,12 @@
     }
 
     if (/bloquead/.test(q)) {
-      var blocked = tasks.filter(function (t) { return t.blockedBy.length && t.status !== "done"; });
+      var blocked = tasks.filter(PF.isBlocked);
       if (!blocked.length) return h("div", {}, h("p", {}, "Nenhuma tarefa bloqueada no momento."));
       var w2 = h("div", {}, h("p", {}, blocked.length + " tarefa(s) bloqueada(s):"));
       var ul2 = h("ul");
       blocked.forEach(function (t) {
-        var names = t.blockedBy.map(function (id) { var bt = PF.task(id); return bt ? bt.ref : "?"; }).join(", ");
+        var names = PF.activeBlockers(t).map(function (bt) { return bt.ref; }).join(", ");
         ul2.appendChild(h("li", {},
           h("a", { href: "#", class: "mono", onclick: function (e) { e.preventDefault(); PF.ui.openTask(t.id); } }, t.ref),
           " " + t.title + " — aguardando " + names));
@@ -169,7 +173,7 @@
       PF.STATUSES.forEach(function (s) { byStatus[s] = tasks.filter(function (t) { return t.status === s; }).length; });
       var review = tasks.filter(function (t) { return t.status === "in_review"; });
       var wip = tasks.filter(function (t) { return t.status === "in_progress"; });
-      var blocked2 = tasks.filter(function (t) { return t.blockedBy.length && t.status !== "done"; });
+      var blocked2 = tasks.filter(PF.isBlocked);
       var w4 = h("div", {}, h("p", {}, "Leitura do fluxo atual:"));
       var ul4 = h("ul");
       ul4.appendChild(h("li", {}, "Em revisão: " + review.length + " tarefa(s)" + (review.length > wip.length * 0.6 ? " — a coluna de revisão está acumulando; considere limitar WIP ou reservar horário de revisão." : ".")));
@@ -236,28 +240,40 @@
     applyBtn.addEventListener("click", function () {
       if (!PF.can("ai.apply")) { PF.deny("aplicar propostas da IA", "ai"); return; }
       var projectId = target.value;
+      if (!projectId || !PF.canSeeProject(projectId)) { PF.toast("Escolha o projeto de destino", "Nenhum projeto ativo disponível para o seu perfil.", "warn"); return; }
       var selected = checks.filter(function (c) { return c.cb.checked; });
       if (!selected.length) { PF.toast("Nada selecionado", "Marque ao menos um item.", "warn"); return; }
       applyBtn.classList.add("is-loading");
+      applyBtn.setAttribute("aria-busy", "true");
       setTimeout(function () {
         var currentEpic = null, lastTask = null, created = 0;
-        selected.forEach(function (c) {
-          var it = c.item;
-          if (it.kind === "epic") {
-            currentEpic = PF.act.createEpic(projectId, { name: it.title, desc: it.desc || "" }, "ai");
-          } else if (it.kind === "subtask" && lastTask) {
-            PF.act.createTask({ projectId: projectId, parentId: lastTask.id, type: "subtask", title: it.title, priority: it.prio, epicId: currentEpic ? currentEpic.id : null, silent: true }, "ai");
-            created++;
-          } else {
-            lastTask = PF.act.createTask({
-              projectId: projectId, title: it.title, priority: it.prio || "medium",
-              epicId: currentEpic ? currentEpic.id : null, status: "backlog", silent: true,
-              acceptance: (it.accept || []).map(function (a) { return { text: a, done: false }; })
-            }, "ai");
-            if (lastTask) created++;
-          }
+        PF.batch(function () {
+          checks.forEach(function (c) {
+            var it = c.item;
+            if (!c.cb.checked) {
+              // item desmarcado: o que vem abaixo dele não é pendurado em outro pai
+              if (it.kind === "epic") currentEpic = null;
+              if (it.kind === "task") lastTask = null;
+              return;
+            }
+            if (it.kind === "epic") {
+              currentEpic = PF.act.createEpic(projectId, { name: it.title, desc: it.desc || "" }, "ai");
+            } else if (it.kind === "subtask") {
+              if (!lastTask) return;
+              var sub = PF.act.createTask({ projectId: projectId, parentId: lastTask.id, type: "subtask", title: it.title, priority: it.prio, epicId: currentEpic ? currentEpic.id : null, silent: true }, "ai");
+              if (sub) created++;
+            } else {
+              lastTask = PF.act.createTask({
+                projectId: projectId, title: it.title, priority: it.prio || "medium",
+                epicId: currentEpic ? currentEpic.id : null, status: "backlog", silent: true,
+                acceptance: (it.accept || []).map(function (a) { return { text: a, done: false }; })
+              }, "ai");
+              if (lastTask) created++;
+            }
+          });
         });
         applyBtn.classList.remove("is-loading");
+        applyBtn.removeAttribute("aria-busy");
         if (created) {
           PF.toast("Backlog criado pela IA", created + " tarefa(s) adicionadas a " + PF.project(projectId).name + ". Veja no Kanban (coluna Backlog).", "ok");
           box.replaceChildren(h("div", { class: "prop-item" }, icon("check", 14), h("span", {}, created + " itens criados em " + PF.project(projectId).name + " — registrados na auditoria com origem “ai”.")));
@@ -426,6 +442,11 @@
       PF.save();
     }
     if (!tool) return { ok: false, error: "Ferramenta desconhecida: " + toolName };
+    if (args == null) args = {};
+    if (typeof args !== "object" || Array.isArray(args)) {
+      logRun(false, "Argumentos inválidos");
+      return { ok: false, error: "invalid_args", detail: "Os argumentos devem ser um objeto JSON." };
+    }
     var capNeeded = tool.kind === "write" ? "mcp.write" : "mcp.read";
     if (!PF.can(capNeeded)) {
       logRun(false, "Negado: perfil sem " + capNeeded);
@@ -457,7 +478,12 @@
     try {
       switch (toolName) {
         case "projects_list": {
-          var list = PF.visibleProjects().filter(function (p) { return !args.status || p.status === args.status; })
+          if (args.status && ["active", "paused", "done", "archived"].indexOf(args.status) < 0) { res = { ok: false, error: "invalid_args", detail: "status deve ser active, paused, done ou archived." }; logRun(false, "Status inválido"); break; }
+          var wantArchived = args.status === "archived";
+          var list = PF.visibleProjects({ includeArchived: wantArchived }).filter(function (p) {
+            if (wantArchived) return p.archived && (PF.can("project.archive") || PF.can("audit.view"));
+            return !args.status || p.status === args.status;
+          })
             .map(function (p) { return { key: p.key, name: p.name, status: p.status, priority: p.priority, progress: PF.projectProgress(p.id) + "%", targetDate: p.targetDate }; });
           res = { ok: true, count: list.length, projects: list };
           logRun(true, list.length + " projetos retornados");
@@ -474,6 +500,8 @@
         }
         case "projects_create": {
           if (!args.name || !args.key) { res = { ok: false, error: "invalid_args", detail: "name e key são obrigatórios." }; logRun(false, "Argumentos inválidos"); break; }
+          var perr = PF.validateProject({ name: args.name, key: args.key, desc: args.description == null ? "" : args.description }, null);
+          if (perr) { res = { ok: false, error: "invalid_args", detail: perr }; logRun(false, "Argumentos inválidos"); break; }
           if (!PF.can("project.create")) { res = { ok: false, error: "permission_denied", detail: "Papel sem project.create." }; logRun(false, "Negado: project.create"); break; }
           if (PF.db.projects.some(function (px) { return px.key === String(args.key).toUpperCase(); })) { res = { ok: false, error: "conflict", detail: "Chave já em uso." }; logRun(false, "Chave duplicada"); break; }
           var np = PF.act.createProject({ name: args.name, key: args.key, desc: args.description || "", source: "mcp" });
@@ -483,6 +511,8 @@
         }
         case "tasks_list": {
           var tp = findProject(args.project);
+          if (args.project && !tp) { res = { ok: false, error: "not_found", detail: "Projeto não encontrado ou sem acesso." }; logRun(false, "Projeto não encontrado"); break; }
+          if (args.status && PF.STATUSES.indexOf(args.status) < 0) { res = { ok: false, error: "invalid_args", detail: "status deve ser um de: " + PF.STATUSES.join(", ") }; logRun(false, "Status inválido"); break; }
           var ts = PF.visibleTasks().filter(function (t) {
             if (t.parentId) return false;
             if (tp && t.projectId !== tp.id) return false;
@@ -516,14 +546,16 @@
         case "tasks_create": {
           var pc = findProject(args.project);
           if (!pc) { res = { ok: false, error: "not_found", detail: "Projeto não encontrado." }; logRun(false, "Projeto não encontrado"); break; }
-          if (!args.title) { res = { ok: false, error: "invalid_args", detail: "title é obrigatório." }; logRun(false, "Argumentos inválidos"); break; }
+          if (args.type != null && ["task", "bug"].indexOf(args.type) < 0) { res = { ok: false, error: "invalid_args", detail: "type deve ser task ou bug." }; logRun(false, "Tipo inválido"); break; }
+          var cerr = PF.validateTask({ title: args.title, priority: args.priority || "medium", type: args.type || "task" }, pc.id, null);
+          if (cerr) { res = { ok: false, error: "invalid_args", detail: cerr }; logRun(false, "Argumentos inválidos"); break; }
           var assg = null;
           if (args.assignee) {
             var au = findMember(pc.id, args.assignee);
             if (!au) { res = { ok: false, error: "invalid_args", detail: "Responsável precisa ser membro ativo das equipes do projeto." }; logRun(false, "Responsável inválido"); break; }
             assg = au.id;
           }
-          var nt = PF.act.createTask({ projectId: pc.id, title: args.title, type: args.type || "task", priority: args.priority || "medium", assigneeId: assg, silent: true }, "mcp");
+          var nt = PF.act.createTask({ projectId: pc.id, title: args.title.trim(), type: args.type || "task", priority: args.priority || "medium", assigneeId: assg, silent: true }, "mcp");
           res = nt ? { ok: true, task: tjson(nt) } : { ok: false, error: "denied" };
           logRun(!!nt, nt ? "Tarefa " + nt.ref + " criada" : "Negado");
           if (nt) PF.toast("MCP criou uma tarefa", nt.ref + " — " + nt.title, "ok");
@@ -534,16 +566,20 @@
           if (!tu) { res = { ok: false, error: "not_found" }; logRun(false, "Tarefa não encontrada"); break; }
           var allowed = ["title", "desc", "description", "priority", "dueDate"];
           var fields = {};
-          Object.keys(args.fields || {}).forEach(function (k) {
+          if (args.fields == null || typeof args.fields !== "object" || Array.isArray(args.fields)) args.fields = {};
+          Object.keys(args.fields).forEach(function (k) {
             var kk = k === "description" ? "desc" : k;
             if (allowed.indexOf(k) >= 0 || allowed.indexOf(kk) >= 0) fields[kk] = args.fields[k];
           });
           if (!Object.keys(fields).length) { res = { ok: false, error: "invalid_args", detail: "fields deve conter title, description, priority ou dueDate." }; logRun(false, "Campos inválidos"); break; }
-          var before = tu.priority;
+          if (typeof fields.title === "string") fields.title = fields.title.trim();
+          if (fields.dueDate === "") fields.dueDate = null;
+          var uerr = PF.validateTask(fields, tu.projectId, tu);
+          if (uerr) { res = { ok: false, error: "invalid_args", detail: uerr }; logRun(false, "Argumentos inválidos"); break; }
+          if (!PF.canTouchTask(tu)) { PF.deny("editar a tarefa " + tu.ref, "mcp"); res = { ok: false, error: "permission_denied" }; logRun(false, "Negado: task.edit"); break; }
           PF.act.updateTask(tu.id, fields, "mcp");
           res = { ok: true, task: tjson(PF.task(tu.id)) };
           logRun(true, "Tarefa " + tu.ref + " atualizada");
-          void before;
           break;
         }
         case "tasks_assign": {
@@ -552,7 +588,7 @@
           var uu = findMember(ta.projectId, args.assignee);
           if (!uu) { res = { ok: false, error: "invalid_args", detail: "Responsável não encontrado entre os membros das equipes do projeto — use o nome completo." }; logRun(false, "Responsável inválido"); break; }
           if (!PF.can("task.assign")) { res = { ok: false, error: "permission_denied", detail: "Papel sem task.assign." }; logRun(false, "Negado: task.assign"); break; }
-          PF.act.updateTask(ta.id, { assigneeId: uu.id }, "mcp");
+          if (!PF.act.updateTask(ta.id, { assigneeId: uu.id }, "mcp") && ta.assigneeId !== uu.id) { res = { ok: false, error: "permission_denied" }; logRun(false, "Negado"); break; }
           res = { ok: true, task: tjson(PF.task(ta.id)) };
           logRun(true, ta.ref + " atribuída a " + uu.name);
           break;
@@ -561,13 +597,14 @@
           var tm = findTask(args.ref);
           if (!tm) { res = { ok: false, error: "not_found" }; logRun(false, "Tarefa não encontrada"); break; }
           if (PF.STATUSES.indexOf(args.status) < 0) { res = { ok: false, error: "invalid_args", detail: "status deve ser um de: " + PF.STATUSES.join(", ") }; logRun(false, "Status inválido"); break; }
-          PF.act.moveTask(tm.id, args.status, "mcp");
+          if (!PF.act.moveTask(tm.id, args.status, "mcp") && tm.status !== args.status) { res = { ok: false, error: "permission_denied" }; logRun(false, "Negado"); break; }
           res = { ok: true, task: tjson(PF.task(tm.id)) };
           logRun(true, tm.ref + " movida para " + args.status);
           break;
         }
         case "sprints_list": {
           var ps = findProject(args.project);
+          if (args.project && !ps) { res = { ok: false, error: "not_found", detail: "Projeto não encontrado ou sem acesso." }; logRun(false, "Projeto não encontrado"); break; }
           var sps = PF.db.sprints.filter(function (s) { return (!ps || s.projectId === ps.id) && PF.canSeeProject(s.projectId); })
             .map(function (s) {
               var stt = PF.db.tasks.filter(function (t) { return t.sprintId === s.id && !t.parentId; });
@@ -625,7 +662,7 @@
             wh.health === "failing" ? h("span", { class: "chip danger" }, "endpoint com falhas") : null,
             h("span", { class: "spacer" }),
             PF.can("webhook.manage") ? [
-              h("button", { class: "btn btn-sm", onclick: function () { PF.act.testWebhook(wh.id); } }, icon("play", 12), "Testar"),
+              h("button", { class: "btn btn-sm", disabled: !wh.active, title: wh.active ? null : "Ative a assinatura para testar", onclick: function () { PF.act.testWebhook(wh.id); } }, icon("play", 12), "Testar"),
               h("button", { class: "btn btn-sm", onclick: function () { webhookModal(wh); } }, icon("edit", 12), "Editar"),
               PF.switchEl(wh.active, function (v) { PF.act.updateWebhook(wh.id, { active: v }); }, "Ativar " + wh.name),
               h("button", { class: "btn btn-ghost btn-icon btn-sm", "aria-label": "Excluir " + wh.name, onclick: function () {
@@ -687,6 +724,7 @@
         var tbC = h("tbody");
         var DESC = {
           "project.created.v1": "um projeto é criado", "project.updated.v1": "um projeto é editado",
+          "project.archived.v1": "um projeto é arquivado", "project.unarchived.v1": "um projeto arquivado é restaurado",
           "task.created.v1": "uma tarefa é criada", "task.assigned.v1": "uma tarefa muda de responsável",
           "task.status_changed.v1": "uma tarefa muda de status (Kanban ou drawer)", "task.completed.v1": "uma tarefa chega a Concluído",
           "sprint.started.v1": "uma sprint é iniciada", "sprint.completed.v1": "uma sprint é encerrada"
@@ -762,8 +800,9 @@
           h("span", { class: "muted", style: "font-size:11px" }, PF.fmtDateTime(a.ts))));
       });
       if (d.status === "failed" && PF.can("webhook.manage")) {
-        body.appendChild(h("div", { style: "margin-top:10px" },
-          h("button", { class: "btn btn-primary btn-sm", onclick: function () { PF.act.redeliver(d.id); } }, icon("refresh", 13), "Reenviar evento")));
+        body.appendChild(wh ? h("div", { style: "margin-top:10px" },
+          h("button", { class: "btn btn-primary btn-sm", onclick: function () { PF.act.redeliver(d.id); } }, icon("refresh", 13), "Reenviar evento"))
+          : h("p", { class: "subtle", style: "font-size:12px;margin-top:10px" }, "A assinatura desta entrega foi excluída; não há destino para reenviar."));
       }
       body.appendChild(h("div", { class: "section-h" }, "Payload"));
       body.appendChild(h("pre", { class: "code" }, JSON.stringify(d.payload, null, 2)));
