@@ -74,7 +74,12 @@
     if (h1) h1.setAttribute("tabindex", "-1");
     document.title = (h1 ? h1.textContent : route.title) + " · ProjectFlow AI";
     PF._shell = shell;
+    PF.applyNavState();
   };
+  // mudança de largura (desktop ↔ off-canvas) refaz o estado inerte da navegação
+  if (window.matchMedia) {
+    try { window.matchMedia("(max-width: 860px)").addEventListener("change", function () { if (!PF.isNarrow()) PF.closeNav({ restore: false }); PF.applyNavState(); }); } catch (e) { /* navegadores antigos */ }
+  }
 
   // depois de trocar de rota: foco no título da página (leitor de tela anuncia o novo contexto)
   PF.focusPageTitle = function () {
@@ -87,11 +92,14 @@
   };
 
   function renderSidebar(app, activeKey) {
-    var sb = h("aside", { class: "sidebar" });
+    var sb = h("aside", { class: "sidebar", id: "sidebar", "aria-label": "Menu lateral" });
     var isInsights = app === "insights";
     sb.appendChild(h("div", { class: "sb-brand" },
       h("span", { class: "sb-logo", "aria-hidden": "true" }, "P"),
-      h("span", {}, h("b", {}, "ProjectFlow AI"), h("span", { class: "env" }, isInsights ? "Insights" : "Workspace"))
+      h("span", {}, h("b", {}, "ProjectFlow AI"), h("span", { class: "env" }, isInsights ? "Insights" : "Workspace")),
+      h("span", { class: "grow" }),
+      // visível só com a navegação off-canvas aberta (PF.applyNavState)
+      h("button", { class: "btn btn-ghost btn-icon sb-close", "aria-label": "Fechar menu", style: "display:none;margin-left:auto", onclick: function () { PF.closeNav(); } }, icon("x"))
     ));
 
     var sw = h("div", { class: "app-switch", role: "tablist", "aria-label": "Alternar aplicação" },
@@ -112,8 +120,8 @@
       var btn = h("button", {
         class: "sb-item" + (activeKey === it.route ? " active" : ""),
         onclick: function () {
+          PF.closeNav({ restore: false });
           PF.navigate("/" + it.route);
-          document.querySelector(".shell") && document.querySelector(".shell").classList.remove("nav-open");
         }
       }, icon(it.icon, 16), h("span", { class: "grow" }, it.label));
       if (it.cnt) {
@@ -137,8 +145,9 @@
   function renderTopbar(route, parts) {
     var tb = h("header", { class: "topbar" });
     tb.appendChild(h("button", {
-      class: "btn btn-ghost btn-icon tb-burger", "aria-label": "Abrir menu",
-      onclick: function () { document.querySelector(".shell").classList.toggle("nav-open"); }
+      class: "btn btn-ghost btn-icon tb-burger", "aria-label": "Abrir menu de navegação",
+      "aria-expanded": PF._navOpen ? "true" : "false", "aria-controls": "sidebar",
+      onclick: function () { if (PF._navOpen) PF.closeNav(); else PF.openNav(); }
     }, icon("menu")));
 
     // breadcrumbs
@@ -236,11 +245,11 @@
     var me = PF.me();
     var mine = PF.db.notifications.filter(function (n) { return PF.can("user.manage") || n.toUserId === me.id; });
     var unread = mine.slice(0, 5);
-    var btn = h("button", { class: "btn btn-ghost btn-icon bell-wrap", "aria-label": "Notificações", "data-tip": "Notificações" }, icon("bell"));
+    var btn = h("button", { class: "btn btn-ghost btn-icon bell-wrap", "aria-label": "Notificações", "data-tip": "Notificações", "aria-haspopup": "menu", "aria-expanded": "false" }, icon("bell"));
     if (mine.some(function (n) { return n.status === "failed"; })) btn.appendChild(h("span", { class: "notif-dot" }));
     btn.addEventListener("click", function () {
       var items = [{ head: "Notificações recentes" }];
-      if (!unread.length) items.push({ label: "Nenhuma notificação", onClick: function () {} });
+      if (!unread.length) items.push({ head: "Nenhuma notificação" });
       unread.forEach(function (n) {
         items.push({
           icon: n.channel === "email" ? "mail" : n.channel === "sms" ? "sms" : "wapp",
@@ -258,7 +267,7 @@
 
   function renderProfile() {
     var me = PF.me();
-    var btn = h("button", { class: "profile-btn", "aria-label": "Trocar perfil de demonstração" },
+    var btn = h("button", { class: "profile-btn", "aria-label": "Trocar perfil de demonstração", "aria-haspopup": "menu", "aria-expanded": "false" },
       PF.avatarEl(me),
       h("span", { class: "who" }, h("b", {}, me.name), h("span", {}, PF.roleName(me.roleId))),
       icon("chevD", 13)
@@ -271,7 +280,7 @@
           node: PF.avatarEl(u, "sm"),
           label: u.name,
           sub: PF.roleName(u.roleId) + " · " + u.title,
-          checked: u.id === me.id,
+          checked: u.id === me.id, radio: true,
           onClick: function () { PF.act.setProfile(u.id); }
         });
       });
@@ -280,7 +289,7 @@
       PF.db.users.filter(function (u) { return DEMO_PROFILES.indexOf(u.id) < 0 && !u.invited; }).slice(0, 5).forEach(function (u) {
         items.push({
           node: PF.avatarEl(u, "sm"), label: u.name, sub: PF.roleName(u.roleId),
-          checked: u.id === me.id,
+          checked: u.id === me.id, radio: true,
           onClick: function () { PF.act.setProfile(u.id); }
         });
       });
@@ -590,7 +599,7 @@
   PF.ui.riskChip = riskChip;
 
   function projectMenuBtn(p) {
-    var btn = h("button", { class: "btn btn-ghost btn-icon btn-sm", "aria-label": "Ações do projeto", onclick: function (e) { e.stopPropagation(); } }, icon("dots", 15));
+    var btn = h("button", { class: "btn btn-ghost btn-icon btn-sm", "aria-label": "Ações do projeto " + p.name, "aria-haspopup": "menu", "aria-expanded": "false", onclick: function (e) { e.stopPropagation(); } }, icon("dots", 15));
     btn.addEventListener("click", function () {
       var items = [
         { icon: "external", label: "Abrir projeto", onClick: function () { PF.navigate("/projects/" + p.id); } },

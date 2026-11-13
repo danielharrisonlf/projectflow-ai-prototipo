@@ -891,80 +891,178 @@
     setTimeout(function () { el.textContent = msg; }, 30);
   };
 
-  /* ---------- overlays ---------- */
+  /* ---------- camadas: modal, drawer, menu e navegação móvel ----------
+     Pilha única: foco inicial, foco preso no diálogo do topo, fundo inerte,
+     Esc fecha só a camada do topo e o foco volta ao gatilho. */
   var overlays = function () { return document.getElementById("overlays"); };
+  var layers = [];
+  var FOCUSABLE = "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
 
-  PF.closeOverlays = function () {
+  function layerEl(l) { return l.getEl ? l.getEl() : l.el; }
+  function isDialog(l) { return l.kind === "modal" || l.kind === "drawer"; }
+  function syncInert() {
+    var app = document.getElementById("app");
+    var dialogs = layers.filter(isDialog);
+    if (app) app.inert = dialogs.length > 0;
+    // diálogos abaixo do topo (ex.: drawer sob uma confirmação) também ficam inertes
+    dialogs.forEach(function (l, i) {
+      var below = i < dialogs.length - 1;
+      l.el.inert = below;
+      if (l.parts) l.parts.forEach(function (p) { p.inert = below; });
+    });
+  }
+  function focusablesIn(root) {
+    return Array.prototype.filter.call(root.querySelectorAll(FOCUSABLE), function (el) {
+      return !el.closest("[inert]") && (el.offsetParent !== null || el === document.activeElement);
+    });
+  }
+  function returnFocus(l) {
+    var t = l.trigger;
+    if (t && t.isConnected && !t.closest("[inert]") && t !== document.body) { t.focus({ preventScroll: true }); return; }
+    if (l.triggerKey && PF.restoreFocus(l.triggerKey)) return;
+    var top = layers[layers.length - 1];
+    if (top && layerEl(top)) { var f = focusablesIn(layerEl(top))[0]; if (f) { f.focus(); return; } }
+    PF.focusFallback("app");
+  }
+  PF.pushLayer = function (l) {
+    l.trigger = l.trigger || document.activeElement;
+    l.triggerKey = PF.captureFocus();
+    layers.push(l);
+    syncInert();
+    return l;
+  };
+  PF.closeLayer = function (l, opts) {
+    var i = layers.indexOf(l);
+    if (i < 0) return;
+    while (layers.length > i) {
+      var x = layers.pop();
+      if (x.teardown) x.teardown();
+      if (x.onClose) x.onClose();
+    }
+    syncInert();
+    if (!opts || opts.restore !== false) returnFocus(l);
+  };
+  PF.topLayer = function () { return layers[layers.length - 1] || null; };
+  // fecha todas as camadas (rota nova, ação concluída)
+  PF.closeOverlays = function (opts) {
+    if (layers.length) PF.closeLayer(layers[0], opts);
     overlays().replaceChildren();
     PF._drawerRefresh = null;
-    document.removeEventListener("keydown", escClose);
   };
-  function escClose(e) { if (e.key === "Escape") PF.closeOverlays(); }
+  function closeKind(kind) {
+    var l = layers.filter(function (x) { return x.kind === kind; })[0];
+    if (l) PF.closeLayer(l, { restore: false });
+  }
+
+  function trapTab(root, e) {
+    var list = focusablesIn(root);
+    if (!list.length) { e.preventDefault(); root.focus(); return; }
+    var first = list[0], last = list[list.length - 1], a = document.activeElement;
+    if (e.shiftKey && (a === first || !root.contains(a))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && (a === last || !root.contains(a))) { e.preventDefault(); first.focus(); }
+  }
+  document.addEventListener("keydown", function (e) {
+    var top = PF.topLayer();
+    if (!top) return;
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); PF.closeLayer(top); return; }
+    if (top.onKey && top.onKey(e) === true) return;
+    if (e.key === "Tab") {
+      if (top.kind === "menu") { PF.closeLayer(top); return; } // o Tab segue a partir do gatilho
+      var root = layerEl(top);
+      if (root) trapTab(root, e);
+    }
+  }, true);
+
+  function stackZ(base) { return base + 2 * layers.filter(isDialog).length; }
 
   PF.modal = function (opts) {
-    PF.closeOverlays();
-    var card = h("div", { class: "modal-card" + (opts.wide ? " wide" : ""), role: "dialog", "aria-modal": "true", "aria-label": opts.title });
+    closeMenu(); closeKind("nav");
+    layers.filter(function (l) { return l.kind === "modal"; }).slice(0, 1).forEach(function (l) { PF.closeLayer(l, { restore: false }); });
+    var titleId = PF.uid("dlg");
+    var card = h("div", { class: "modal-card" + (opts.wide ? " wide" : ""), role: opts.alert ? "alertdialog" : "dialog", "aria-modal": "true", "aria-labelledby": titleId, tabindex: "-1" });
+    var layer;
+    function close() { PF.closeLayer(layer); }
     card.appendChild(h("div", { class: "modal-head" },
-      h("h3", {}, opts.title),
+      h("h3", { id: titleId }, opts.title),
       h("span", { class: "grow" }),
-      h("button", { class: "btn btn-ghost btn-icon", "aria-label": "Fechar", onclick: PF.closeOverlays }, icon("x"))
+      h("button", { class: "btn btn-ghost btn-icon", "aria-label": "Fechar", onclick: close }, icon("x"))
     ));
     var body = h("div", { class: "modal-body" });
     append(body, opts.body);
     card.appendChild(body);
     if (opts.foot) { var f = h("div", { class: "modal-foot" }); append(f, opts.foot); card.appendChild(f); }
-    var wrap = h("div", { class: "modal" }, card);
-    var bd = h("div", { class: "backdrop", onclick: PF.closeOverlays });
+    var z = stackZ(95);
+    var wrap = h("div", { class: "modal", style: "z-index:" + z }, card);
+    var bd = h("div", { class: "backdrop", style: "z-index:" + (z - 1), onclick: close });
+    // clique fora do cartão (área do .modal) também fecha
+    wrap.addEventListener("mousedown", function (e) { if (e.target === wrap) close(); });
     overlays().append(bd, wrap);
-    document.addEventListener("keydown", escClose);
-    var first = card.querySelector("input, select, textarea, button:not([aria-label=Fechar])");
-    if (first) first.focus();
-    return { close: PF.closeOverlays, card: card };
+    layer = PF.pushLayer({ kind: "modal", el: card, parts: [wrap, bd], onClose: opts.onClose, teardown: function () { bd.remove(); wrap.remove(); } });
+    var first = card.querySelector("input:not([disabled]), select:not([disabled]), textarea:not([disabled]), .modal-foot button, button:not([aria-label=Fechar])");
+    (first || card).focus();
+    return { close: close, card: card, layer: layer };
   };
 
   PF.confirm = function (opts) {
     return new Promise(function (resolve) {
+      var done = false;
+      function finish(v) { if (done) return; done = true; resolve(v); }
       var m = PF.modal({
-        title: opts.title || "Confirmar",
+        title: opts.title || "Confirmar", alert: true,
         body: h("p", { style: "margin:0" }, opts.msg),
+        onClose: function () { finish(false); },
         foot: [
-          h("button", { class: "btn", onclick: function () { PF.closeOverlays(); resolve(false); } }, "Cancelar"),
-          h("button", { class: "btn " + (opts.danger ? "btn-danger" : "btn-primary"), onclick: function () { PF.closeOverlays(); resolve(true); } }, opts.confirmLabel || "Confirmar")
+          h("button", { class: "btn", onclick: function () { m.close(); finish(false); } }, "Cancelar"),
+          h("button", { class: "btn " + (opts.danger ? "btn-danger" : "btn-primary"), onclick: function () { finish(true); m.close(); } }, opts.confirmLabel || "Confirmar")
         ]
       });
-      void m;
     });
   };
 
   PF.drawer = function (opts) {
-    PF.closeOverlays();
-    var dr = h("aside", { class: "drawer", role: "dialog", "aria-modal": "true", "aria-label": opts.label || "Detalhes" });
+    closeMenu(); closeKind("nav");
+    // abrir outro drawer a partir de um drawer mantém o gatilho original
+    var prev = layers.filter(function (l) { return l.kind === "drawer"; })[0];
+    var trigger = document.activeElement, triggerKey = null;
+    if (prev && trigger && overlays().contains(trigger)) { trigger = prev.trigger; triggerKey = prev.triggerKey; }
+    if (layers.length) PF.closeLayer(layers[0], { restore: false });
+    overlays().replaceChildren();
+    var dr = h("aside", { class: "drawer", role: "dialog", "aria-modal": "true", "aria-label": opts.label || "Detalhes", tabindex: "-1" });
+    var layer;
+    function close() { PF.closeLayer(layer); }
     var head = h("div", { class: "drawer-head" });
     append(head, opts.head);
     head.appendChild(h("span", { class: "grow" }));
     if (opts.headActions) append(head, opts.headActions);
-    head.appendChild(h("button", { class: "btn btn-ghost btn-icon", "aria-label": "Fechar", onclick: PF.closeOverlays }, icon("x")));
+    head.appendChild(h("button", { class: "btn btn-ghost btn-icon", "aria-label": "Fechar", onclick: close }, icon("x")));
     var body = h("div", { class: "drawer-body" });
     append(body, opts.body);
     dr.append(head, body);
     if (opts.foot) { var f = h("div", { class: "drawer-foot" }); append(f, opts.foot); dr.appendChild(f); }
-    var bd = h("div", { class: "backdrop", onclick: PF.closeOverlays });
+    var bd = h("div", { class: "backdrop", onclick: close });
     overlays().append(bd, dr);
-    document.addEventListener("keydown", escClose);
-    return { close: PF.closeOverlays, body: body, head: head };
+    layer = PF.pushLayer({ kind: "drawer", el: dr, parts: [bd], trigger: trigger, teardown: function () { bd.remove(); dr.remove(); PF._drawerRefresh = null; } });
+    if (triggerKey) layer.triggerKey = triggerKey;
+    dr.focus();
+    return { close: close, body: body, head: head, layer: layer };
   };
 
+  /* menu (padrão APG Menu Button) */
   PF.menuOpen = null;
-  PF.menu = function (anchor, items) {
+  PF.menu = function (anchor, items, opts) {
+    opts = opts || {};
     closeMenu();
-    var m = h("div", { class: "menu", role: "menu" });
+    var menuId = PF.uid("mn");
+    var m = h("div", { class: "menu", role: "menu", id: menuId, "aria-label": opts.label || anchor.getAttribute("aria-label") || (anchor.textContent || "").trim() || "Menu" });
+    var layer;
     items.forEach(function (it) {
-      if (it === "sep") { m.appendChild(h("div", { class: "menu-sep" })); return; }
-      if (it.head) { m.appendChild(h("div", { class: "menu-head" }, it.head)); return; }
+      if (it === "sep") { m.appendChild(h("div", { class: "menu-sep", role: "separator" })); return; }
+      if (it.head) { m.appendChild(h("div", { class: "menu-head", role: "presentation" }, it.head)); return; }
+      var role = it.radio ? "menuitemradio" : (it.checked != null ? "menuitemcheckbox" : "menuitem");
       var btn = h("button", {
-        class: "menu-item" + (it.danger ? " danger" : ""), role: "menuitem",
-        "aria-checked": it.checked ? "true" : null,
-        onclick: function () { closeMenu(); it.onClick && it.onClick(); }
+        class: "menu-item" + (it.danger ? " danger" : ""), role: role, tabindex: "-1",
+        "aria-checked": role === "menuitem" ? null : (it.checked ? "true" : "false"),
+        onclick: function () { PF.closeLayer(layer); if (it.onClick) it.onClick(); }
       });
       if (it.icon) btn.appendChild(icon(it.icon, 15));
       if (it.node) btn.appendChild(it.node);
@@ -980,23 +1078,80 @@
     var x = Math.min(r.left, window.innerWidth - mw - 8);
     var y = r.bottom + 6;
     if (y + mh > window.innerHeight - 8) y = Math.max(8, r.top - mh - 6);
-    m.style.left = x + "px"; m.style.top = y + "px";
+    m.style.left = Math.max(8, x) + "px"; m.style.top = y + "px";
+    anchor.setAttribute("aria-haspopup", "menu");
+    anchor.setAttribute("aria-expanded", "true");
+    anchor.setAttribute("aria-controls", menuId);
+    function itemsList() { return Array.prototype.slice.call(m.querySelectorAll(".menu-item")); }
+    function onDoc(e) { if (!m.contains(e.target) && !anchor.contains(e.target)) PF.closeLayer(layer, { restore: false }); }
+    var typed = "", typedT = null;
+    layer = PF.pushLayer({
+      kind: "menu", el: m, trigger: anchor,
+      teardown: function () {
+        document.removeEventListener("click", onDoc, true);
+        m.remove(); PF.menuOpen = null;
+        anchor.setAttribute("aria-expanded", "false");
+        anchor.removeAttribute("aria-controls");
+      },
+      onKey: function (e) {
+        var list = itemsList(), i = list.indexOf(document.activeElement);
+        var go = function (j) { if (list.length) list[(j + list.length) % list.length].focus(); };
+        if (e.key === "ArrowDown") { e.preventDefault(); go(i + 1); return true; }
+        if (e.key === "ArrowUp") { e.preventDefault(); go(i < 0 ? -1 : i - 1); return true; }
+        if (e.key === "Home") { e.preventDefault(); go(0); return true; }
+        if (e.key === "End") { e.preventDefault(); go(-1); return true; }
+        if (e.key.length === 1 && /\S/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          clearTimeout(typedT); typed += e.key.toLowerCase(); typedT = setTimeout(function () { typed = ""; }, 600);
+          var start = typed.length === 1 ? i + 1 : Math.max(i, 0);
+          for (var k = 0; k < list.length; k++) {
+            var cand = list[(start + k) % list.length];
+            if ((cand.textContent || "").trim().toLowerCase().indexOf(typed) === 0) { cand.focus(); break; }
+          }
+          return true;
+        }
+        return false;
+      }
+    });
     PF.menuOpen = m;
-    setTimeout(function () {
-      document.addEventListener("click", onDoc);
-      document.addEventListener("keydown", onEsc);
-    }, 0);
-    function onDoc(e) { if (!m.contains(e.target)) closeMenu(); }
-    function onEsc(e) { if (e.key === "Escape") closeMenu(); }
-    function closeMenuInner() {
-      document.removeEventListener("click", onDoc);
-      document.removeEventListener("keydown", onEsc);
-      m.remove(); PF.menuOpen = null;
-    }
-    m._close = closeMenuInner;
+    m._close = function () { PF.closeLayer(layer, { restore: false }); };
+    setTimeout(function () { document.addEventListener("click", onDoc, true); }, 0);
+    var first = itemsList()[0];
+    if (first) first.focus();
   };
-  function closeMenu() { if (PF.menuOpen && PF.menuOpen._close) PF.menuOpen._close(); }
+  function closeMenu() { closeKind("menu"); }
   PF.closeMenu = closeMenu;
+
+  /* navegação lateral off-canvas (≤ 860px) */
+  PF.isNarrow = function () { return !!(window.matchMedia && window.matchMedia("(max-width: 860px)").matches); };
+  PF._navOpen = false;
+  PF.applyNavState = function () {
+    var shell = document.querySelector(".shell");
+    if (!shell) return;
+    var sb = shell.querySelector(".sidebar"), main = shell.querySelector(".main"), burger = shell.querySelector(".tb-burger");
+    shell.classList.toggle("nav-open", PF._navOpen);
+    if (sb) sb.inert = PF.isNarrow() && !PF._navOpen;
+    if (main) main.inert = PF._navOpen;
+    if (burger) burger.setAttribute("aria-expanded", PF._navOpen ? "true" : "false");
+    var closeBtn = sb && sb.querySelector(".sb-close");
+    if (closeBtn) closeBtn.style.display = PF._navOpen ? "" : "none";
+  };
+  PF.openNav = function () {
+    if (PF._navOpen) return;
+    closeMenu();
+    PF._navOpen = true;
+    var layer;
+    var bd = h("div", { class: "backdrop", style: "z-index:105", onclick: function () { PF.closeLayer(layer); } });
+    overlays().appendChild(bd);
+    layer = PF.pushLayer({
+      kind: "nav", getEl: function () { return document.querySelector(".sidebar"); },
+      teardown: function () { bd.remove(); PF._navOpen = false; PF.applyNavState(); }
+    });
+    PF.applyNavState();
+    var sb = document.querySelector(".sidebar");
+    var cur = sb && (sb.querySelector(".sb-item.active") || focusablesIn(sb)[0]);
+    if (cur) cur.focus();
+  };
+  PF.closeNav = function (opts) { var l = layers.filter(function (x) { return x.kind === "nav"; })[0]; if (l) PF.closeLayer(l, opts); };
 
   PF.toast = function (title, msg, kind) {
     kind = kind || "info";

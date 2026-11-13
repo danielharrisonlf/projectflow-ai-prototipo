@@ -169,7 +169,7 @@
       var labRow = h("div", { style: "display:flex;gap:6px;flex-wrap:wrap;align-items:center" });
       t.labels.forEach(function (l) { labRow.appendChild(PF.labelChip(l)); });
       if (canEdit) {
-        var addLab = h("button", { class: "btn btn-ghost btn-sm", "aria-label": "Editar etiquetas" }, icon("tag", 13), "Etiquetas");
+        var addLab = h("button", { class: "btn btn-ghost btn-sm", "aria-label": "Editar etiquetas", "aria-haspopup": "menu", "aria-expanded": "false" }, icon("tag", 13), "Etiquetas");
         addLab.addEventListener("click", function () {
           PF.menu(addLab, LABELS.map(function (l) {
             return {
@@ -184,7 +184,7 @@
           }));
         });
         labRow.appendChild(addLab);
-        var blockBtn = h("button", { class: "btn btn-ghost btn-sm" }, icon("block", 13), "Dependência");
+        var blockBtn = h("button", { class: "btn btn-ghost btn-sm", "aria-haspopup": "menu", "aria-expanded": "false" }, icon("block", 13), "Dependência");
         blockBtn.addEventListener("click", function () {
           var candidates = PF.projectTasks(p.id).filter(function (x) { return x.id !== t.id && !x.parentId && x.status !== "done"; }).slice(0, 12);
           PF.menu(blockBtn, [{ head: "Bloqueada por…" }].concat(candidates.map(function (x) {
@@ -286,7 +286,7 @@
   };
 
   function taskMenuBtn(taskId) {
-    var btn = h("button", { class: "btn btn-ghost btn-icon", "aria-label": "Ações da tarefa" }, icon("dots", 15));
+    var btn = h("button", { class: "btn btn-ghost btn-icon", "aria-label": "Ações da tarefa", "aria-haspopup": "menu", "aria-expanded": "false" }, icon("dots", 15));
     btn.addEventListener("click", function () {
       var t = PF.task(taskId);
       var items = [];
@@ -646,7 +646,7 @@
               .then(function (ok) { if (ok) PF.act.completeSprint(s.id); });
           } }, "Encerrar sprint"));
           if (s.status !== "done") {
-            var addBtn = h("button", { class: "btn btn-sm" }, icon("plus", 12), "Adicionar do backlog");
+            var addBtn = h("button", { class: "btn btn-sm", "aria-haspopup": "menu", "aria-expanded": "false" }, icon("plus", 12), "Adicionar do backlog");
             addBtn.addEventListener("click", function () {
               var backlog = PF.projectTasks(p.id).filter(function (t) { return !t.sprintId && !t.parentId && t.status !== "done"; }).slice(0, 14);
               if (!backlog.length) { PF.toast("Backlog vazio", "Não há tarefas fora de sprint neste projeto.", "info"); return; }
