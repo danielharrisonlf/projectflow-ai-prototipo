@@ -312,7 +312,7 @@
     span.style.color = m.color;
     span.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + m.glyph + "</svg>";
     if (!bare) span.appendChild(document.createTextNode(m.label));
-    else span.setAttribute("data-tip", m.label);
+    else { span.setAttribute("data-tip", m.label); span.setAttribute("role", "img"); span.setAttribute("aria-label", "Prioridade " + m.label); }
     return span;
   };
 
@@ -327,24 +327,28 @@
     var s = icon(m.icon, size || 14);
     s.style.color = m.color;
     s.setAttribute("data-tip", m.label);
+    s.setAttribute("role", "img");
+    s.setAttribute("aria-label", m.label);
     return s;
   };
 
   PF.avatarEl = function (user, size) {
     if (!user) {
-      var ghost = h("span", { class: "avatar " + (size || ""), "data-tip": "Sem responsável" });
+      var ghost = h("span", { class: "avatar " + (size || ""), "data-tip": "Sem responsável", role: "img", "aria-label": "Sem responsável" });
       ghost.style.background = "var(--surface-2)";
       ghost.style.border = "1px dashed var(--border-2)";
       return ghost;
     }
-    var a = h("span", { class: "avatar " + (size || ""), "data-tip": user.name }, user.initials);
+    var a = h("span", { class: "avatar " + (size || ""), "data-tip": user.name, role: "img", "aria-label": user.name }, user.initials);
     a.style.setProperty("--av", user.color);
     return a;
   };
   PF.whoCell = function (userId) {
     var u = PF.user(userId);
     if (!u) return h("span", { class: "muted" }, "—");
-    return h("span", { class: "who-cell" }, PF.avatarEl(u, "sm"), h("span", { class: "nm" }, u.name));
+    var av = PF.avatarEl(u, "sm");
+    av.setAttribute("aria-hidden", "true"); // o nome já está ao lado
+    return h("span", { class: "who-cell" }, av, h("span", { class: "nm" }, u.name));
   };
   PF.LABELS = ["backend", "frontend", "mobile", "infra", "dados", "ux", "seguranca", "performance", "documentacao", "cliente"];
   PF.labelChip = function (name) {
@@ -1517,20 +1521,52 @@
   };
   PF.closeNav = function (opts) { var l = layers.filter(function (x) { return x.kind === "nav"; })[0]; if (l) PF.closeLayer(l, opts); };
 
-  PF.toast = function (title, msg, kind) {
-    kind = kind || "info";
-    var icons = { ok: "check", err: "alert", warn: "alert", info: "info" };
-    var t = h("div", { class: "toast " + kind },
-      h("span", { class: "t-ic" }, icon(icons[kind], 16)),
-      h("div", {}, h("b", {}, title), msg ? h("span", {}, msg) : null)
-    );
-    document.getElementById("toasts").appendChild(t);
+  /* avisos: fechar, pausa com mouse/foco, erro fica até ser fechado,
+     no máximo 3 visíveis e repetidos agrupados com contador */
+  var MAX_TOASTS = 3;
+  PF.toast = function (title, msg, kind, opts) {
+    kind = kind || "info"; opts = opts || {};
+    var host = document.getElementById("toasts");
+    var key = kind + "|" + title + "|" + (msg || "");
     PF.announce(title + (msg ? ". " + msg : ""), kind === "err");
-    setTimeout(function () {
+    var live = Array.prototype.filter.call(host.children, function (el) { return !el.classList.contains("leaving"); });
+    var same = live.filter(function (el) { return el._key === key; })[0];
+    if (same) {
+      same._count++;
+      same.querySelector(".t-count").textContent = " (" + same._count + "×)";
+      same._arm();
+      return same;
+    }
+    var icons = { ok: "check", err: "block", warn: "alert", info: "info" };
+    var duration = opts.duration != null ? opts.duration : (kind === "err" ? 0 : 4200);
+    var timer = null;
+    function dismiss() {
+      clearTimeout(timer);
+      if (t.classList.contains("leaving")) return;
+      var hadFocus = t.contains(document.activeElement);
       t.classList.add("leaving");
       setTimeout(function () { t.remove(); }, 220);
-    }, 4200);
+      if (hadFocus) PF.focusFallback("app");
+    }
+    var t = h("div", { class: "toast " + kind },
+      h("span", { class: "t-ic", "aria-hidden": "true" }, icon(icons[kind] || "info", 16)),
+      h("div", { class: "grow" }, h("b", {}, title, h("span", { class: "t-count num" })), msg ? h("span", {}, msg) : null),
+      h("button", { class: "btn btn-ghost btn-icon btn-sm toast-close", "aria-label": "Fechar aviso: " + title, style: "margin-left:auto;flex:none", onclick: dismiss }, icon("x", 12))
+    );
+    t._key = key; t._count = 1;
+    t._arm = function () { clearTimeout(timer); if (duration) timer = setTimeout(dismiss, duration); };
+    t.addEventListener("mouseenter", function () { clearTimeout(timer); });
+    t.addEventListener("focusin", function () { clearTimeout(timer); });
+    t.addEventListener("mouseleave", function () { if (!t.contains(document.activeElement)) t._arm(); });
+    t.addEventListener("focusout", function (e) { if (!t.contains(e.relatedTarget)) t._arm(); });
+    host.appendChild(t);
+    // excedente: sai o mais antigo
+    live.push(t);
+    while (live.length > MAX_TOASTS) { var old = live.shift(); old.classList.add("leaving"); old.remove(); }
+    t._arm();
+    return t;
   };
+  PF.ROWLINK_STYLE = "background:none;border:0;padding:0;margin:0;font:inherit;color:inherit;text-align:left;cursor:pointer;text-decoration:none";
 
   // a Clipboard API devolve Promise: o aviso de sucesso só aparece quando a cópia acontece de fato
   PF.copyText = function (text, okTitle) {
@@ -1541,8 +1577,9 @@
     } catch (e) { fail(); }
   };
 
-  PF.emptyState = function (iconName, title, msg, action) {
-    return h("div", { class: "empty" },
+  // opts.compact: variante para painel (mesma estrutura, classe extra)
+  PF.emptyState = function (iconName, title, msg, action, opts) {
+    return h("div", { class: "empty" + (opts && opts.compact ? " compact" : "") },
       h("div", { class: "e-ic" }, icon(iconName, 20)),
       h("b", {}, title),
       h("p", {}, msg || ""),
@@ -1550,22 +1587,65 @@
     );
   };
 
+  /* campos: label ligado ao controle; dica e erro ligados por aria-describedby */
+  function addDescribedBy(el, id) {
+    var cur = (el.getAttribute("aria-describedby") || "").split(" ").filter(Boolean);
+    if (cur.indexOf(id) < 0) cur.push(id);
+    el.setAttribute("aria-describedby", cur.join(" "));
+  }
+  function removeDescribedBy(el, id) {
+    var cur = (el.getAttribute("aria-describedby") || "").split(" ").filter(function (x) { return x && x !== id; });
+    if (cur.length) el.setAttribute("aria-describedby", cur.join(" ")); else el.removeAttribute("aria-describedby");
+  }
   PF.field = function (label, control, opts) {
     opts = opts || {};
-    var f = h("div", { class: "field" + (opts.span2 ? " span2" : "") }, h("label", {}, label), control);
-    if (opts.hint) f.appendChild(h("span", { class: "hint" }, opts.hint));
+    if (!control.id) control.id = PF.uid("fld-");
+    var lbl = h("label", { for: control.id }, label, opts.required ? h("span", { class: "req", "aria-hidden": "true" }, " *") : null);
+    if (opts.required) control.setAttribute("aria-required", "true");
+    var f = h("div", { class: "field" + (opts.span2 ? " span2" : "") }, lbl, control);
+    if (opts.hint) {
+      var hid = PF.uid("hint-");
+      f.appendChild(h("span", { class: "hint", id: hid }, opts.hint));
+      addDescribedBy(control, hid);
+    }
     return f;
+  };
+  // grupo de caixas de seleção (etiquetas, equipes, eventos) com nome acessível
+  PF.fieldGroup = function (label, content, opts) {
+    opts = opts || {};
+    var lid = PF.uid("grp-");
+    return h("div", { class: "field" + (opts.span2 ? " span2" : ""), role: "group", "aria-labelledby": lid },
+      h("label", { id: lid }, label), content);
   };
   PF.setInvalid = function (fieldEl, msg) {
     fieldEl.classList.add("invalid");
     var old = fieldEl.querySelector(".err");
     if (old) old.remove();
-    fieldEl.appendChild(h("span", { class: "err" }, icon("alert", 12), msg));
+    var eid = PF.uid("err-");
+    fieldEl.appendChild(h("span", { class: "err", id: eid }, icon("alert", 12), msg));
+    var isGroup = fieldEl.getAttribute("role") === "group";
+    var ctl = isGroup ? fieldEl : fieldEl.querySelector("input:not([type=checkbox]), select, textarea");
+    if (ctl) {
+      if (!isGroup) ctl.setAttribute("aria-invalid", "true");
+      addDescribedBy(ctl, eid);
+      fieldEl._errId = eid;
+    }
+    // foco no primeiro campo inválido do formulário
+    var form = fieldEl.closest("[data-pf-form]");
+    if (form && !form._invalidFocused) {
+      form._invalidFocused = true;
+      var target = isGroup ? fieldEl.querySelector("input") : ctl;
+      if (target) target.focus();
+    }
   };
   PF.clearInvalid = function (form) {
+    form.setAttribute("data-pf-form", "");
+    form._invalidFocused = false;
     form.querySelectorAll(".field.invalid").forEach(function (f) {
       f.classList.remove("invalid");
       var e = f.querySelector(".err"); if (e) e.remove();
+      var ctl = f.getAttribute("role") === "group" ? f : f.querySelector("[aria-invalid]");
+      if (ctl) { ctl.removeAttribute("aria-invalid"); if (f._errId) removeDescribedBy(ctl, f._errId); }
     });
   };
 
@@ -1586,8 +1666,9 @@
     return h("span", { class: "switch" }, input, h("span", { class: "tr" }));
   };
 
-  PF.progressBar = function (pct, ok) {
-    var p = h("div", { class: "progress" + (ok ? " ok" : ""), role: "progressbar", "aria-valuenow": Math.round(pct) },
+  PF.progressBar = function (pct, ok, label) {
+    var p = h("div", { class: "progress" + (ok ? " ok" : ""), role: "progressbar", "aria-valuenow": Math.round(pct),
+      "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuetext": Math.round(pct) + "%", "aria-label": label || "Progresso" },
       h("i", { style: "width:" + Math.max(0, Math.min(100, pct)) + "%" }));
     return p;
   };

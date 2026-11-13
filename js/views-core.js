@@ -111,9 +111,9 @@
       h("button", { class: "btn btn-ghost btn-icon sb-close", "aria-label": "Fechar menu", style: "display:none;margin-left:auto", onclick: function () { PF.closeNav(); } }, icon("x"))
     ));
 
-    var sw = h("div", { class: "app-switch", role: "tablist", "aria-label": "Alternar aplicação" },
-      h("button", { class: !isInsights ? "active" : "", onclick: function () { PF.act.setApp("workspace"); } }, "Workspace"),
-      h("button", { class: isInsights ? "active" : "", onclick: function () { PF.act.setApp("insights"); } }, "Insights")
+    var sw = h("div", { class: "app-switch", role: "group", "aria-label": "Alternar aplicação" },
+      h("button", { class: !isInsights ? "active" : "", "aria-pressed": !isInsights ? "true" : "false", onclick: function () { PF.act.setApp("workspace"); } }, "Workspace"),
+      h("button", { class: isInsights ? "active" : "", "aria-pressed": isInsights ? "true" : "false", onclick: function () { PF.act.setApp("insights"); } }, "Insights")
     );
     sb.appendChild(sw);
 
@@ -316,6 +316,18 @@
       h("button", { class: "btn", onclick: function () { PF.navigate("/dashboard"); } }, "Voltar ao início"));
   };
 
+  PF.ui.tabNav = function (label, items, active, base) {
+    var nav = h("nav", { class: "tabs", "aria-label": label, "data-keep-focus": "" });
+    items.forEach(function (tp) {
+      var on = active === tp[0];
+      nav.appendChild(h("button", {
+        class: "tab" + (on ? " active" : ""), "aria-current": on ? "page" : null, "data-fk": "tab-" + base + tp[0],
+        onclick: function () { PF.navigate(base + tp[0]); }
+      }, tp[1]));
+    });
+    return nav;
+  };
+
   PF.ui.pageHead = function (title, sub, actions) {
     var head = h("div", { class: "page-head" },
       h("div", {}, h("h1", {}, title), sub ? h("div", { class: "sub" }, sub) : null));
@@ -382,14 +394,14 @@
       var doneInPeriod = tasks.filter(function (t) { return t.status === "done" && t.doneAt && new Date(t.doneAt).getTime() >= cutoff; });
 
       var strip = h("div", { class: "stat-strip", style: "margin-bottom:14px" });
-      function stat(lbl, val, ctx, ctxClass, onclick) {
-        var s = h("div", { class: "stat" + (onclick ? " clickable" : ""), onclick: onclick },
+      function stat(lbl, val, ctx, ctxClass, href) {
+        var s = h(href ? "a" : "div", { class: "stat" + (href ? " clickable" : ""), href: href ? "#" + href : null, style: href ? "color:inherit;text-decoration:none;display:block" : null },
           h("div", { class: "lbl" }, lbl), h("div", { class: "val" }, String(val)),
           ctx ? h("div", { class: "ctx " + (ctxClass || "") }, ctx) : null);
         strip.appendChild(s);
       }
-      stat("Projetos ativos", activeProjects.length, projects.filter(function (p) { return PF.projectRisk(p).level === "high"; }).length + " em risco", "bad", function () { PF.navigate("/projects"); });
-      stat("Minhas tarefas abertas", myOpen.length, myOpen.filter(PF.isOverdue).length + " atrasadas", myOpen.filter(PF.isOverdue).length ? "bad" : "", function () { PF.navigate("/my-tasks"); });
+      stat("Projetos ativos", activeProjects.length, projects.filter(function (p) { return PF.projectRisk(p).level === "high"; }).length + " em risco", "bad", "/projects");
+      stat("Minhas tarefas abertas", myOpen.length, myOpen.filter(PF.isOverdue).length + " atrasadas", myOpen.filter(PF.isOverdue).length ? "bad" : "", "/my-tasks");
       stat("Tarefas atrasadas", late.length, "no recorte atual", late.length ? "bad" : "good");
       stat("Entregas em 7 dias", next7.length, "com prazo definido");
       stat("Concluídas no período", doneInPeriod.length, "últimos " + dashF.period + " dias", "good");
@@ -437,7 +449,7 @@
         if (dashF.projectId && a.projectId !== dashF.projectId) return false;
         return new Date(a.ts).getTime() >= cutoff && a.action !== "denied";
       }).slice(0, 8);
-      if (!acts.length) actBody.appendChild(h("p", { class: "muted" }, "Nenhuma atividade no período."));
+      if (!acts.length) actBody.appendChild(PF.emptyState("pulse", "Nenhuma atividade no período", "Amplie o período ou limpe os filtros.", null, { compact: true }));
       acts.forEach(function (a) {
         var u = PF.user(a.userId);
         actBody.appendChild(h("div", { class: "hist-item" },
@@ -453,7 +465,8 @@
       pSpr.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Sprints ativas"), h("span", { class: "spacer" }),
         h("button", { class: "btn btn-ghost btn-sm", onclick: function () { PF.navigate("/sprints"); } }, "Sprints", icon("arrowR", 12))));
       var sprBody = h("div", { class: "panel-body" });
-      if (!activeSprints.length) sprBody.appendChild(h("p", { class: "muted" }, "Nenhuma sprint ativa no recorte."));
+      if (!activeSprints.length) sprBody.appendChild(PF.emptyState("sprint", "Nenhuma sprint ativa", "Inicie uma sprint planejada para acompanhar o progresso aqui.",
+        h("a", { class: "btn btn-sm", href: "#/sprints" }, "Ir para Sprints"), { compact: true }));
       activeSprints.forEach(function (s) {
         var st = PF.db.tasks.filter(function (t) { return t.sprintId === s.id && !t.parentId; });
         var done = st.filter(function (t) { return t.status === "done"; }).length;
@@ -462,7 +475,7 @@
           h("div", { style: "display:flex;gap:8px;align-items:baseline;margin-bottom:4px" },
             h("b", {}, s.name), h("span", { class: "subtle", style: "font-size:11px" }, PF.project(s.projectId).name),
             h("span", { class: "grow" }), h("span", { class: "num muted", style: "font-size:12px" }, done + "/" + st.length)),
-          PF.progressBar(pct, pct === 100),
+          PF.progressBar(pct, pct === 100, "Progresso da " + s.name),
           h("div", { class: "subtle", style: "font-size:11px;margin-top:3px" }, "termina " + PF.fmtDate(s.endDate))));
       });
       pSpr.appendChild(sprBody);
@@ -473,7 +486,8 @@
       var pFav = h("div", { class: "panel" });
       pFav.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Projetos favoritos")));
       var favBody = h("div", { class: "panel-body flush" });
-      if (!favs.length) favBody.appendChild(h("div", { class: "panel-body" }, h("p", { class: "muted", style: "margin:0" }, "Marque projetos com a estrela para fixá-los aqui.")));
+      if (!favs.length) favBody.appendChild(PF.emptyState("star", "Nenhum favorito", "Marque projetos com a estrela na lista de Projetos para fixá-los aqui.",
+        h("a", { class: "btn btn-sm", href: "#/projects" }, "Ver projetos"), { compact: true }));
       favs.forEach(function (p) {
         var prog = PF.projectProgress(p.id);
         favBody.appendChild(h("button", {
@@ -604,13 +618,13 @@
             h("td", {}, starBtn),
             h("td", {}, h("div", { style: "display:flex;gap:8px;align-items:center" },
               h("span", { class: "dot", style: "background:" + p.color }),
-              h("div", {}, h("b", {}, p.name), h("div", { class: "mono subtle" }, p.key)))),
+              h("div", {}, h("a", { href: "#/projects/" + p.id, class: "row-link", style: PF.ROWLINK_STYLE }, h("b", {}, p.name)), h("div", { class: "mono subtle" }, p.key)))),
             h("td", {}, statusChipProject(p)),
             h("td", {}, PF.prioChip(p.priority)),
-            h("td", {}, h("div", { style: "display:flex;gap:8px;align-items:center" }, PF.progressBar(prog, prog === 100), h("span", { class: "num muted", style: "font-size:11.5px" }, prog + "%"))),
-            h("td", {}, h("span", { class: "avatar-stack" }, p.teamIds.slice(0, 3).map(function (tid) {
+            h("td", {}, h("div", { style: "display:flex;gap:8px;align-items:center" }, PF.progressBar(prog, prog === 100, "Progresso de " + p.name), h("span", { class: "num muted", style: "font-size:11.5px", "aria-hidden": "true" }, prog + "%"))),
+            h("td", {}, h("span", { class: "avatar-stack", role: "img", "aria-label": "Equipes: " + p.teamIds.map(function (tid) { var tm = PF.team(tid); return tm ? tm.name : ""; }).filter(Boolean).join(", ") }, p.teamIds.slice(0, 3).map(function (tid) {
               var tm = PF.team(tid);
-              var a = h("span", { class: "avatar sm", "data-tip": tm ? tm.name : "" }, tm ? tm.name.slice(0, 2).toUpperCase() : "?");
+              var a = h("span", { class: "avatar sm", "data-tip": tm ? tm.name : "", "aria-hidden": "true" }, tm ? tm.name.slice(0, 2).toUpperCase() : "?");
               a.style.setProperty("--av", "var(--ink-3)");
               return a;
             }))),
@@ -686,15 +700,15 @@
     });
 
     var form = h("div", { class: "form-grid" },
-      PF.field("Nome do projeto", f.name, { span2: true }),
-      PF.field("Chave", f.key, { hint: "2 a 4 letras usadas nos identificadores (ex.: PCL-124)" }),
+      PF.field("Nome do projeto", f.name, { span2: true, required: true }),
+      PF.field("Chave", f.key, { hint: "2 a 4 letras usadas nos identificadores (ex.: PCL-124)", required: !existing }),
       PF.field("Prioridade", f.priority),
       PF.field("Responsável", f.lead),
       existing ? PF.field("Status", f.status) : h("span"),
       PF.field("Início", f.start),
       PF.field("Entrega prevista", f.target),
       PF.field("Descrição", f.desc, { span2: true }),
-      h("div", { class: "field span2" }, h("label", {}, "Equipes associadas"), h("div", {}, teamBoxes))
+      PF.fieldGroup("Equipes associadas", h("div", {}, teamBoxes), { span2: true })
     );
 
     PF.modal({
@@ -754,17 +768,10 @@
       statusChipProject(p), PF.prioChip(p.priority), riskChip(risk),
       h("span", { class: "chip" }, h("span", { class: "mono" }, p.key)),
       h("span", { class: "muted", style: "font-size:12px" }, "Início " + PF.fmtDate(p.startDate) + " · Entrega " + PF.fmtDate(p.targetDate)),
-      h("span", { style: "display:flex;gap:8px;align-items:center" }, PF.progressBar(prog, prog === 100), h("span", { class: "num muted", style: "font-size:12px" }, prog + "%")));
+      h("span", { style: "display:flex;gap:8px;align-items:center" }, PF.progressBar(prog, prog === 100, "Progresso de " + p.name), h("span", { class: "num muted", style: "font-size:12px", "aria-hidden": "true" }, prog + "%")));
     page.appendChild(meta);
 
-    var tabs = h("div", { class: "tabs", role: "tablist" });
-    [["overview", "Visão geral"], ["tasks", "Tarefas (" + tasks.length + ")"], ["members", "Membros"], ["settings", "Configurações"]].forEach(function (tp) {
-      tabs.appendChild(h("button", {
-        class: "tab" + (tab === tp[0] ? " active" : ""), role: "tab",
-        onclick: function () { PF.navigate("/projects/" + id + "/" + tp[0]); }
-      }, tp[1]));
-    });
-    page.appendChild(tabs);
+    page.appendChild(PF.ui.tabNav("Seções do projeto", [["overview", "Visão geral"], ["tasks", "Tarefas (" + tasks.length + ")"], ["members", "Membros"], ["settings", "Configurações"]], tab, "/projects/" + id + "/"));
 
     if (tab === "overview") {
       var grid = h("div", { class: "grid c2" });
@@ -774,7 +781,8 @@
         PF.can("task.create") ? h("button", { class: "btn btn-sm", onclick: function () { epicModal(p); } }, icon("plus", 12), "Épico") : null));
       var peB = h("div", { class: "panel-body" });
       var eps = PF.epicsOf(id);
-      if (!eps.length) peB.appendChild(h("p", { class: "muted" }, "Nenhum épico neste projeto."));
+      if (!eps.length) peB.appendChild(PF.emptyState("epic", "Nenhum épico neste projeto", "Épicos agrupam tarefas de uma mesma entrega.",
+        PF.can("task.create") ? h("button", { class: "btn btn-sm", onclick: function () { epicModal(p); } }, icon("plus", 12), "Novo épico") : null, { compact: true }));
       eps.forEach(function (ep) {
         var epTasks = tasks.filter(function (t) { return t.epicId === ep.id; });
         var epDone = epTasks.filter(function (t) { return t.status === "done"; }).length;
@@ -783,7 +791,7 @@
           h("div", { style: "display:flex;gap:7px;align-items:center;margin-bottom:4px" },
             PF.typeIcon("epic"), h("b", {}, ep.name), h("span", { class: "grow" }),
             h("span", { class: "num muted", style: "font-size:11.5px" }, epDone + "/" + epTasks.length)),
-          PF.progressBar(pct, pct === 100),
+          PF.progressBar(pct, pct === 100, "Progresso do épico " + ep.name),
           h("div", { class: "subtle", style: "font-size:11.5px;margin-top:3px" }, ep.desc)));
       });
       pe.appendChild(peB);
@@ -795,7 +803,7 @@
       pm.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Marcos de entrega")));
       var pmB = h("div", { class: "panel-body" });
       var mss = PF.db.milestones.filter(function (m) { return m.projectId === id; });
-      if (!mss.length) pmB.appendChild(h("p", { class: "muted" }, "Nenhum marco cadastrado."));
+      if (!mss.length) pmB.appendChild(PF.emptyState("target", "Nenhum marco cadastrado", "Os marcos de entrega do projeto aparecem aqui e no Cronograma.", null, { compact: true }));
       mss.forEach(function (m) {
         var late = m.status !== "done" && PF.daysLeft(m.date) < 0;
         pmB.appendChild(h("div", { class: "hist-item" },
@@ -877,7 +885,7 @@
   function epicModal(project) {
     var name = h("input", { class: "input", maxlength: "70" });
     var desc = h("textarea", { class: "textarea" });
-    var form = h("div", {}, PF.field("Nome do épico", name), PF.field("Descrição", desc));
+    var form = h("div", {}, PF.field("Nome do épico", name, { required: true }), PF.field("Descrição", desc));
     PF.modal({
       title: "Novo épico em " + project.name,
       body: form,
@@ -933,7 +941,7 @@
     var name = h("input", { class: "input", maxlength: "40" });
     var desc = h("input", { class: "input", maxlength: "90" });
     var lead = PF.select([{ value: "", label: "Sem líder definido" }].concat(PF.db.users.filter(function (u) { return !u.invited && u.orgId === PF.me().orgId; }).map(function (u) { return { value: u.id, label: u.name }; })), "");
-    var form = h("div", {}, PF.field("Nome da equipe", name), PF.field("Descrição", desc), PF.field("Líder", lead));
+    var form = h("div", {}, PF.field("Nome da equipe", name, { required: true }), PF.field("Descrição", desc), PF.field("Líder", lead));
     PF.modal({
       title: "Nova equipe", body: form,
       foot: [
@@ -987,11 +995,7 @@
         "Organização → Equipe → Cargo → Papel de acesso. O papel define capacidades; o cargo descreve a função; a participação em projeto vem das equipes.",
         PF.can("user.manage") ? h("button", { class: "btn btn-primary", onclick: inviteModal }, icon("plus", 14), "Convidar colaborador") : null));
 
-      var tabs = h("div", { class: "tabs" });
-      [["users", "Usuários"], ["roles", "Papéis e permissões"]].forEach(function (tp) {
-        tabs.appendChild(h("button", { class: "tab" + (tab === tp[0] ? " active" : ""), onclick: function () { PF.navigate("/access/" + tp[0]); } }, tp[1]));
-      });
-      page.appendChild(tabs);
+      page.appendChild(PF.ui.tabNav("Seções de usuários e permissões", [["users", "Usuários"], ["roles", "Papéis e permissões"]], tab, "/access/"));
 
       if (tab === "users") {
         var tbl = h("table", { class: "tbl" },
@@ -1068,10 +1072,10 @@
       return h("label", { class: "check" }, cb, h("span", {}, tm.name));
     });
     var form = h("div", { class: "form-grid" },
-      PF.field("Nome completo", name, { span2: true }),
-      PF.field("E-mail", email), PF.field("Cargo", title),
+      PF.field("Nome completo", name, { span2: true, required: true }),
+      PF.field("E-mail", email, { required: true }), PF.field("Cargo", title),
       PF.field("Papel de acesso", role, { span2: true }),
-      h("div", { class: "field span2" }, h("label", {}, "Equipes"), h("div", {}, teamBoxes)));
+      PF.fieldGroup("Equipes", h("div", {}, teamBoxes), { span2: true }));
     PF.modal({
       title: "Convidar colaborador", body: form,
       foot: [
@@ -1099,11 +1103,7 @@
     render: function (page, params) {
       var tab = params[0] || "general";
       page.appendChild(PF.ui.pageHead("Configurações", "Preferências do workspace e arquitetura simulada do produto."));
-      var tabs = h("div", { class: "tabs" });
-      [["general", "Geral"], ["arch", "Arquitetura simulada"], ["data", "Dados da demonstração"]].forEach(function (tp) {
-        tabs.appendChild(h("button", { class: "tab" + (tab === tp[0] ? " active" : ""), onclick: function () { PF.navigate("/settings/" + tp[0]); } }, tp[1]));
-      });
-      page.appendChild(tabs);
+      page.appendChild(PF.ui.tabNav("Seções de configurações", [["general", "Geral"], ["arch", "Arquitetura simulada"], ["data", "Dados da demonstração"]], tab, "/settings/"));
 
       if (tab === "general") {
         var org = PF.byId("orgs", PF.me().orgId);
@@ -1116,11 +1116,24 @@
 
         var pt = h("div", { class: "panel", style: "max-width:640px;margin-top:14px" });
         pt.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Aparência")));
-        var seg = h("div", { class: "seg", role: "radiogroup", "aria-label": "Tema" });
-        [["light", "Claro"], ["dark", "Escuro"], ["system", "Sistema"]].forEach(function (m) {
-          seg.appendChild(h("button", { class: PF.db.settings.theme === m[0] ? "active" : "", onclick: function () { PF.act.setTheme(m[0]); } }, m[1]));
+        var themeLbl = PF.uid("lbl-");
+        var seg = h("div", { class: "seg", role: "radiogroup", "aria-labelledby": themeLbl });
+        var THEMES = [["light", "Claro"], ["dark", "Escuro"], ["system", "Sistema"]];
+        THEMES.forEach(function (m) {
+          var on = PF.db.settings.theme === m[0];
+          seg.appendChild(h("button", { class: on ? "active" : "", role: "radio", "aria-checked": on ? "true" : "false", tabindex: on ? "0" : "-1", "data-fk": "tema-" + m[0], onclick: function () { PF.act.setTheme(m[0]); } }, m[1]));
         });
-        pt.appendChild(h("div", { class: "panel-body" }, h("div", { class: "field" }, h("label", {}, "Tema da interface"), seg)));
+        seg.addEventListener("keydown", function (e) {
+          var dir = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+          if (!dir) return;
+          e.preventDefault();
+          var i = THEMES.map(function (m) { return m[0]; }).indexOf(PF.db.settings.theme);
+          var next = THEMES[(i + dir + THEMES.length) % THEMES.length][0];
+          PF.act.setTheme(next);
+          var b = document.querySelector('[data-fk="tema-' + next + '"]');
+          if (b) b.focus();
+        });
+        pt.appendChild(h("div", { class: "panel-body" }, h("div", { class: "field" }, h("label", { id: themeLbl }, "Tema da interface"), seg)));
         page.appendChild(pt);
       }
 

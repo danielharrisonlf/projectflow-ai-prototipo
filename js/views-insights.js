@@ -237,7 +237,7 @@
         if (r != null) teamItems.push({ label: tm.name, value: r, display: r + "%" });
       });
       teamItems.sort(function (a, b) { return b.value - a.value; });
-      p4.appendChild(h("div", { class: "panel-body" }, teamItems.length ? barList(teamItems, { label: "Cumprimento de prazos por equipe", labelW: 130 }) : h("p", { class: "muted" }, "Sem entregas com prazo no recorte.")));
+      p4.appendChild(h("div", { class: "panel-body" }, teamItems.length ? barList(teamItems, { label: "Cumprimento de prazos por equipe", labelW: 130 }) : PF.emptyState("calendar", "Sem tarefas concluídas com prazo", "Conclua tarefas com prazo definido para medir o cumprimento.", null, { compact: true })));
       grid.appendChild(p4);
       page.appendChild(grid);
 
@@ -308,8 +308,8 @@
         var blockedN = ts.filter(PF.isBlocked).length;
         var r = onTimeRate(ts);
         tb.appendChild(h("tr", { class: "row-click", onclick: function () { PF.navigate("/projects/" + p.id); } },
-          h("td", {}, h("b", {}, p.name), h("div", { class: "mono subtle", style: "font-size:10.5px" }, p.key)),
-          h("td", {}, h("div", { style: "display:flex;gap:8px;align-items:center" }, PF.progressBar(prog, prog === 100), h("span", { class: "num muted", style: "font-size:11.5px" }, prog + "%"))),
+          h("td", {}, h("a", { href: "#/projects/" + p.id, class: "row-link", style: PF.ROWLINK_STYLE }, h("b", {}, p.name)), h("div", { class: "mono subtle", style: "font-size:10.5px" }, p.key)),
+          h("td", {}, h("div", { style: "display:flex;gap:8px;align-items:center" }, PF.progressBar(prog, prog === 100, "Progresso de " + p.name), h("span", { class: "num muted", style: "font-size:11.5px", "aria-hidden": "true" }, prog + "%"))),
           h("td", { class: "num" }, String(ts.length)),
           h("td", { class: "num" }, lateN ? h("span", { style: "color:var(--danger);font-weight:600" }, String(lateN)) : "0"),
           h("td", { class: "num" }, blockedN ? h("span", { style: "color:var(--warn);font-weight:600" }, String(blockedN)) : "0"),
@@ -339,7 +339,7 @@
           h("td", {}, sp.status === "active" ? h("span", { class: "chip accent" }, "ativa") : sp.status === "done" ? h("span", { class: "chip ok" }, "concluída") : h("span", { class: "chip" }, "planejada")),
           h("td", { class: "num" }, String(ts.length)),
           h("td", { class: "num" }, String(done)),
-          h("td", {}, h("div", { style: "display:flex;gap:8px;align-items:center" }, PF.progressBar(pct, pct === 100), h("span", { class: "num muted", style: "font-size:11.5px" }, pct + "%")))));
+          h("td", {}, h("div", { style: "display:flex;gap:8px;align-items:center" }, PF.progressBar(pct, pct === 100, "Conclusão da " + sp.name), h("span", { class: "num muted", style: "font-size:11.5px", "aria-hidden": "true" }, pct + "%")))));
       });
       tbl2.appendChild(tb2);
       ps.appendChild(h("div", { class: "tbl-wrap" }, tbl2));
@@ -392,7 +392,7 @@
       pd.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Tarefas bloqueadas e dependências críticas")));
       var pdB = h("div", { class: "panel-body" });
       var blocked = tasks.filter(PF.isBlocked);
-      if (!blocked.length) pdB.appendChild(h("p", { class: "muted" }, "Nenhum bloqueio ativo no recorte."));
+      if (!blocked.length) pdB.appendChild(PF.emptyState("check", "Nenhum bloqueio ativo", "Nenhuma tarefa aguarda outra nos filtros atuais.", null, { compact: true }));
       blocked.forEach(function (t) {
         var blockers = PF.activeBlockers(t);
         pdB.appendChild(h("div", { class: "hist-item" },
@@ -476,7 +476,7 @@
           h("td", {}, ENTITY_LABELS[a.entityType] || a.entityType),
           h("td", {}, proj ? proj.name : "—"),
           h("td", {}, h("span", { class: "src-tag " + a.source }, a.source === "ui" ? "interface" : a.source)),
-          h("td", { style: "max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, a.summary)));
+          h("td", { style: "max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, h("button", { type: "button", class: "row-link", style: PF.ROWLINK_STYLE, title: a.summary }, a.summary))));
       });
       tbl.appendChild(tb);
       var panel = h("div", { class: "panel" }, h("div", { class: "tbl-wrap" }, tbl));

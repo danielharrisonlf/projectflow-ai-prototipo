@@ -79,7 +79,9 @@
         log.scrollTop = log.scrollHeight;
         setTimeout(function () {
           typing.remove();
-          chatLog.push({ role: "ai", node: answer(text) });
+          var node = answer(text);
+          chatLog.push({ role: "ai", node: node });
+          PF.announce("Resposta do assistente: " + (node.textContent || "").slice(0, 280));
           PF.auditPush("ai_query", "ai", null, null, null, { prompt: text.slice(0, 80) }, "consultou o assistente de IA", "ai");
           PF.save();
           draw();
@@ -303,11 +305,7 @@
         h("div", { class: "stat" }, h("div", { class: "lbl" }, "Execuções registradas"), h("div", { class: "val" }, String(PF.db.mcpExecutions.length)), h("div", { class: "ctx" }, "histórico simulado")));
       page.appendChild(strip);
 
-      var tabs = h("div", { class: "tabs" });
-      [["tools", "Ferramentas"], ["test", "Testar ferramenta"], ["agents", "Agentes e integrações"], ["runs", "Histórico de execuções"]].forEach(function (tp) {
-        tabs.appendChild(h("button", { class: "tab" + (tab === tp[0] ? " active" : ""), onclick: function () { PF.navigate("/mcp/" + tp[0]); } }, tp[1]));
-      });
-      page.appendChild(tabs);
+      page.appendChild(PF.ui.tabNav("Seções de agentes MCP", [["tools", "Ferramentas"], ["test", "Testar ferramenta"], ["agents", "Agentes e integrações"], ["runs", "Histórico de execuções"]], tab, "/mcp/"));
 
       if (tab === "tools") {
         var tbl = h("table", { class: "tbl" },
@@ -400,7 +398,8 @@
     var runBtn = h("button", { class: "btn btn-primary" }, icon("play", 14), "Executar ferramenta");
     lb.appendChild(PF.field("Ferramenta", toolSel));
     lb.appendChild(descEl);
-    lb.appendChild(PF.field("Argumentos (JSON)", argsIn));
+    var argsField = PF.field("Argumentos (JSON)", argsIn);
+    lb.appendChild(argsField);
     lb.appendChild(h("p", { class: "subtle", style: "font-size:11.5px" },
       "A execução respeita as permissões do perfil ativo (" + PF.roleName(PF.me().roleId) + "). Ferramentas de escrita alteram os dados do protótipo e registram auditoria com origem “mcp”."));
     lb.appendChild(runBtn);
@@ -414,17 +413,25 @@
 
     runBtn.addEventListener("click", function () {
       var args;
+      PF.clearInvalid(lb);
       try { args = argsIn.value.trim() ? JSON.parse(argsIn.value) : {}; }
       catch (e) {
-        testerState.result = { ok: false, error: "JSON inválido: " + e.message };
+        // posição do erro (quando o navegador informa) em linha/coluna
+        var m = /position (\d+)/.exec(e.message || ""), where = "";
+        if (m) { var before = argsIn.value.slice(0, +m[1]).split("\n"); where = " na linha " + before.length + ", coluna " + (before[before.length - 1].length + 1); }
+        var msg = "JSON inválido" + where + ": confira aspas duplas, vírgulas e chaves.";
+        testerState.result = { ok: false, error: "invalid_json", detail: msg };
         out.textContent = JSON.stringify(testerState.result, null, 2);
+        PF.setInvalid(argsField, msg);
         return;
       }
       runBtn.classList.add("is-loading");
+      runBtn.setAttribute("aria-busy", "true");
       setTimeout(function () {
         var res = PF.mcpExecute(toolSel.value, args); // mcpExecute redesenha a página;
         testerState.result = res;                      // o estado persistido devolve a resposta
         PF.refresh();
+        PF.announce(res && res.ok ? "Ferramenta executada com sucesso." : "A ferramenta retornou erro: " + (res && (res.detail || res.error)));
       }, 350);
     });
 
@@ -645,11 +652,7 @@
         "Assinaturas HTTP notificadas quando eventos acontecem (ms-webhooks). Entregas são simuladas localmente — nenhuma requisição externa é feita.",
         PF.can("webhook.manage") ? h("button", { class: "btn btn-primary", onclick: function () { webhookModal(); } }, icon("plus", 14), "Nova assinatura") : null));
 
-      var tabs = h("div", { class: "tabs" });
-      [["subs", "Assinaturas (" + PF.db.webhooks.length + ")"], ["deliveries", "Histórico de entregas (" + PF.db.deliveries.length + ")"], ["catalog", "Catálogo de eventos"]].forEach(function (tp) {
-        tabs.appendChild(h("button", { class: "tab" + (tab === tp[0] ? " active" : ""), onclick: function () { PF.navigate("/webhooks/" + tp[0]); } }, tp[1]));
-      });
-      page.appendChild(tabs);
+      page.appendChild(PF.ui.tabNav("Seções de webhooks", [["subs", "Assinaturas (" + PF.db.webhooks.length + ")"], ["deliveries", "Histórico de entregas (" + PF.db.deliveries.length + ")"], ["catalog", "Catálogo de eventos"]], tab, "/webhooks/"));
 
       if (tab === "subs") {
         if (!PF.db.webhooks.length) { page.appendChild(PF.emptyState("webhook", "Nenhuma assinatura", "Cadastre um endpoint para receber eventos da plataforma.")); return; }
@@ -708,7 +711,7 @@
           var wh = PF.byId("webhooks", d.webhookId);
           tb.appendChild(h("tr", { class: "row-click", onclick: function () { deliveryDrawer(d.id); } },
             h("td", {}, h("span", { class: "deliv-status " + d.status }, icon(d.status === "success" ? "check" : "alert", 13), d.status === "success" ? "entregue" : "falhou")),
-            h("td", { class: "mono", style: "font-size:11.5px" }, d.eventType),
+            h("td", { class: "mono", style: "font-size:11.5px" }, h("button", { type: "button", class: "row-link", style: PF.ROWLINK_STYLE, "aria-label": "Entrega " + d.eventType + " para " + (wh ? wh.name : "assinatura removida") + ", " + (d.status === "success" ? "entregue" : "falhou") }, d.eventType)),
             h("td", {}, wh ? wh.name : "—"),
             h("td", { class: "num mono" }, String(d.httpStatus)),
             h("td", { class: "num" }, String(d.attempts.length)),
@@ -752,9 +755,9 @@
       return h("label", { class: "check" }, cb, h("span", { class: "mono", style: "font-size:12px" }, evt));
     });
     var form = h("div", {},
-      PF.field("Nome", name),
-      PF.field("Endpoint HTTP", url, { hint: "Nenhuma requisição real é feita — URLs contendo “fail” ou “.local” simulam um endpoint com falhas." }),
-      h("div", { class: "field" }, h("label", {}, "Eventos assinados"), h("div", {}, evBoxes)));
+      PF.field("Nome", name, { required: true }),
+      PF.field("Endpoint HTTP", url, { required: true, hint: "Nenhuma requisição real é feita — URLs contendo “fail” ou “.local” simulam um endpoint com falhas." }),
+      PF.fieldGroup("Eventos assinados", h("div", {}, evBoxes)));
     PF.modal({
       title: existing ? "Editar assinatura" : "Nova assinatura de webhook", body: form,
       foot: [
@@ -824,11 +827,7 @@
       page.appendChild(PF.ui.pageHead("Notificações multicanal",
         "Entregas por e-mail, WhatsApp e SMS (ms-notifications). Envios são simulados — nenhuma mensagem real sai do navegador."));
 
-      var tabs = h("div", { class: "tabs" });
-      [["history", "Histórico de envio (" + PF.db.notifications.length + ")"], ["prefs", "Preferências"], ["templates", "Templates"], ["providers", "Provedores"]].forEach(function (tp) {
-        tabs.appendChild(h("button", { class: "tab" + (tab === tp[0] ? " active" : ""), onclick: function () { PF.navigate("/notifications/" + tp[0]); } }, tp[1]));
-      });
-      page.appendChild(tabs);
+      page.appendChild(PF.ui.tabNav("Seções de notificações", [["history", "Histórico de envio (" + PF.visibleNotifications().length + ")"], ["prefs", "Preferências"], ["templates", "Templates"], ["providers", "Provedores"]], tab, "/notifications/"));
 
       var CH_ICON = { email: "mail", whatsapp: "wapp", sms: "sms" };
       var CH_LABEL = { email: "E-mail", whatsapp: "WhatsApp", sms: "SMS" };
@@ -842,7 +841,7 @@
         mine.slice(0, 40).forEach(function (n) {
           tb.appendChild(h("tr", { class: "row-click", onclick: function () { notifDrawer(n.id); } },
             h("td", {}, h("span", { style: "display:inline-flex;gap:6px;align-items:center" }, icon(CH_ICON[n.channel], 14), CH_LABEL[n.channel])),
-            h("td", {}, n.subject),
+            h("td", {}, h("button", { type: "button", class: "row-link", style: PF.ROWLINK_STYLE }, n.subject)),
             h("td", {}, PF.whoCell(n.toUserId)),
             h("td", {}, n.status === "delivered" ? h("span", { class: "deliv-status success" }, icon("check", 13), "entregue") : h("span", { class: "deliv-status failed" }, icon("alert", 13), "falhou")),
             h("td", { class: "num" }, String(n.attempts)),
@@ -940,7 +939,7 @@
     var host = h("input", { class: "input mono", value: pv.host, placeholder: ch === "email" ? "smtp.empresa.dev" : "api.gateway.exemplo" });
     var form = h("div", {},
       h("p", { class: "muted", style: "font-size:12px" }, "Configuração simulada — nenhuma credencial é usada nem armazenada fora do navegador."),
-      PF.field("Remetente", from), PF.field("Servidor / gateway", host));
+      PF.field("Remetente", from, { required: true }), PF.field("Servidor / gateway", host));
     PF.modal({
       title: "Configurar " + pv.name, body: form,
       foot: [
