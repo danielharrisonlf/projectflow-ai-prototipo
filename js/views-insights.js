@@ -19,81 +19,117 @@
     return el;
   }
 
+  // tooltip único dos gráficos (componente .tooltip do design system)
   var tipEl = null;
   function chartTip(x, y, lines) {
-    if (!tipEl) {
-      tipEl = document.createElement("div");
-      tipEl.style.cssText = "position:fixed;z-index:300;pointer-events:none;background:var(--ink);color:var(--bg);font-size:11px;font-weight:500;padding:4px 8px;border-radius:5px;white-space:pre;display:none";
+    if (!tipEl || !tipEl.isConnected) {
+      tipEl = h("div", { class: "tooltip", role: "tooltip", hidden: true });
       document.body.appendChild(tipEl);
     }
-    if (!lines) { tipEl.style.display = "none"; return; }
+    if (!lines) { tipEl.hidden = true; return; }
     tipEl.textContent = lines.join("\n");
-    tipEl.style.display = "block";
-    tipEl.style.left = Math.min(x + 12, window.innerWidth - 160) + "px";
-    tipEl.style.top = (y - 34) + "px";
+    tipEl.hidden = false;
+    var w = tipEl.offsetWidth, hgt = tipEl.offsetHeight;
+    tipEl.style.left = Math.max(8, Math.min(x - w / 2, window.innerWidth - w - 8)) + "px";
+    tipEl.style.top = Math.max(8, y - hgt - 12) + "px";
   }
 
-  /* gráfico de linha (série única, tom de acento) */
+  /* gráfico de linha (série única, acento). Desenhado na largura real do
+     contêiner (1 unidade do SVG = 1px), então os rótulos ficam em 12px em
+     qualquer largura; redesenha quando o contêiner muda de tamanho. */
+  // teto do eixo y divisível em 4 faixas inteiras (0, 2, 4, 6, 8 …)
+  function niceMax(v) {
+    var raw = Math.max(1, v / 4);
+    var p = Math.pow(10, Math.floor(Math.log10(raw))), n = raw / p;
+    var step = (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+    return step * 4;
+  }
   function lineChart(points, opts) {
     opts = opts || {};
-    var W = 640, H = 200, padL = 34, padR = 10, padT = 14, padB = 24;
-    var ys = points.map(function (p) { return p.y; });
-    var maxY = Math.max(4, Math.max.apply(null, ys));
-    var iw = W - padL - padR, ih = H - padT - padB;
-    function px(i) { return padL + (points.length < 2 ? iw / 2 : i * iw / (points.length - 1)); }
-    function py(v) { return padT + ih - (v / maxY) * ih; }
-
-    var svg = s("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": opts.label || "Gráfico de linha" });
-    // grid recessivo
-    [0, 0.5, 1].forEach(function (f) {
-      var y = padT + ih - f * ih;
-      svg.appendChild(s("line", { x1: padL, x2: W - padR, y1: y, y2: y, class: "axis" }));
-      svg.appendChild(s("text", { x: padL - 6, y: y + 3, "text-anchor": "end" }, String(Math.round(maxY * f))));
-    });
-    // rótulos x seletivos
-    points.forEach(function (p, i) {
-      if (i % Math.ceil(points.length / 6) === 0 || i === points.length - 1) {
-        svg.appendChild(s("text", { x: px(i), y: H - 8, "text-anchor": "middle" }, p.label));
-      }
-    });
-    var dLine = points.map(function (p, i) { return (i ? "L" : "M") + px(i).toFixed(1) + " " + py(p.y).toFixed(1); }).join(" ");
-    var dArea = dLine + " L" + px(points.length - 1).toFixed(1) + " " + (padT + ih) + " L" + px(0).toFixed(1) + " " + (padT + ih) + " Z";
-    var area = s("path", { d: dArea, fill: "currentColor", opacity: "0.10", stroke: "none" });
-    area.style.color = "var(--accent)";
-    svg.appendChild(area);
-    var line = s("path", { d: dLine, fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round" });
-    line.style.color = "var(--accent)";
-    svg.appendChild(line);
-    points.forEach(function (p, i) {
-      var dot = s("circle", { cx: px(i), cy: py(p.y), r: 3, fill: "var(--surface)", stroke: "currentColor", "stroke-width": "2" });
-      dot.style.color = "var(--accent)";
-      var hit = s("circle", { cx: px(i), cy: py(p.y), r: 12, fill: "transparent" });
-      hit.addEventListener("mousemove", function (e) { chartTip(e.clientX, e.clientY, [p.label, p.y + " " + (opts.unit || "")]); dot.setAttribute("r", 4.5); });
-      hit.addEventListener("mouseleave", function () { chartTip(0, 0, null); dot.setAttribute("r", 3); });
-      svg.appendChild(dot);
-      svg.appendChild(hit);
-    });
-    return h("div", { class: "chart" }, svg);
+    var wrap = h("div", { class: "chart" });
+    var H = 200, padL = 32, padR = 12, padT = 16, padB = 28;
+    var maxY = niceMax(Math.max.apply(null, points.map(function (p) { return p.y; })));
+    function draw(W) {
+      var iw = W - padL - padR, ih = H - padT - padB;
+      function px(i) { return padL + (points.length < 2 ? iw / 2 : i * iw / (points.length - 1)); }
+      function py(v) { return padT + ih - (v / maxY) * ih; }
+      var svg = s("svg", { viewBox: "0 0 " + W + " " + H, width: W, height: H, role: "img", "aria-label": opts.label || "Gráfico de linha" });
+      // grade recessiva em 4 faixas, com rótulo do eixo y
+      [0, 0.25, 0.5, 0.75, 1].forEach(function (f) {
+        var y = Math.round(padT + ih - f * ih) + 0.5;
+        svg.appendChild(s("line", { x1: padL, x2: W - padR, y1: y, y2: y, class: f === 0 ? "axis" : "grid-line" }));
+        svg.appendChild(s("text", { x: padL - 8, y: y + 4, "text-anchor": "end" }, String(Math.round(maxY * f))));
+      });
+      // rótulos x: quantos couberem (≥ 64px entre eles); 1º à esquerda, último à direita
+      var step = Math.max(1, Math.ceil(points.length / Math.max(2, Math.floor(iw / 64))));
+      points.forEach(function (p, i) {
+        var last = i === points.length - 1;
+        if (i % step !== 0 && !last) return;
+        if (!last && points.length - 1 - i < step / 2 && i !== 0) return; // não encosta no último
+        svg.appendChild(s("text", { x: px(i), y: H - 8, "text-anchor": i === 0 ? "start" : last ? "end" : "middle" }, p.label));
+      });
+      var dLine = points.map(function (p, i) { return (i ? "L" : "M") + px(i).toFixed(1) + " " + py(p.y).toFixed(1); }).join(" ");
+      svg.appendChild(s("path", { class: "ch-area", d: dLine + " L" + px(points.length - 1).toFixed(1) + " " + (padT + ih) + " L" + px(0).toFixed(1) + " " + (padT + ih) + " Z" }));
+      var cross = s("line", { class: "ch-cross", x1: 0, x2: 0, y1: padT, y2: padT + ih });
+      svg.appendChild(cross);
+      svg.appendChild(s("path", { class: "ch-line", d: dLine }));
+      points.forEach(function (p, i) {
+        var last = i === points.length - 1;
+        var dot = s("circle", { class: "ch-dot" + (last ? " last" : ""), cx: px(i), cy: py(p.y), r: last ? 4 : 3 });
+        svg.appendChild(dot);
+        // alvo de hover: faixa vertical inteira da coluna
+        var band = Math.max(12, iw / Math.max(1, points.length - 1));
+        var hit = s("rect", { class: "ch-hit", x: px(i) - band / 2, y: padT, width: band, height: ih });
+        hit.addEventListener("mousemove", function () {
+          var r = dot.getBoundingClientRect();
+          chartTip(r.left + r.width / 2, r.top, [p.label, p.y + " " + (opts.unit || "")]);
+          dot.setAttribute("r", 5);
+          cross.setAttribute("x1", px(i)); cross.setAttribute("x2", px(i)); cross.classList.add("on");
+        });
+        hit.addEventListener("mouseleave", function () { chartTip(0, 0, null); dot.setAttribute("r", last ? 4 : 3); cross.classList.remove("on"); });
+        svg.appendChild(hit);
+      });
+      // valor do último ponto, à direita
+      var lp = points[points.length - 1];
+      if (lp) svg.appendChild(s("text", { class: "ch-val", x: px(points.length - 1) - 8, y: py(lp.y) - 10, "text-anchor": "end" }, String(lp.y)));
+      wrap.replaceChildren(svg);
+    }
+    var lastW = 0;
+    function fit() {
+      var w = Math.round(wrap.clientWidth);
+      if (w > 0 && w !== lastW) { lastW = w; draw(w); }
+    }
+    if (window.ResizeObserver) {
+      var ro = new ResizeObserver(function () { if (!wrap.isConnected) { ro.disconnect(); return; } fit(); });
+      ro.observe(wrap);
+    }
+    // primeira pintura assim que o contêiner entra no documento
+    requestAnimationFrame(fit);
+    draw(640);
+    return wrap;
   }
 
   /* barras horizontais (HTML): rótulo + ícone à esquerda, valor em texto */
   function barList(items, opts) {
     opts = opts || {};
     var max = Math.max(1, Math.max.apply(null, items.map(function (i) { return i.value; })));
-    var wrap = h("div", { role: "img", "aria-label": opts.label || "Gráfico de barras" });
+    var wrap = h("div", { class: "bar-list", role: "img", "aria-label": (opts.label || "Gráfico de barras") + ": " + items.map(function (it) { return it.label + " " + (it.display != null ? it.display : it.value); }).join(", ") });
+    if (opts.labelW) wrap.style.setProperty("--bar-lw", opts.labelW + "px");
     items.forEach(function (it) {
-      var bar = h("div", { style: "flex:1;height:14px;background:var(--surface-2);border-radius:4px;border:1px solid var(--border);overflow:hidden" },
-        h("i", { style: "display:block;height:100%;border-radius:3px;width:" + Math.round(100 * it.value / max) + "%;background:" + (it.color || "var(--accent)") }));
-      var row = h("div", { style: "display:flex;align-items:center;gap:10px;padding:5px 0" },
-        h("span", { style: "width:" + (opts.labelW || 150) + "px;flex:none;display:inline-flex;gap:6px;align-items:center;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, it.icon || null, it.label),
-        bar,
-        h("span", { class: "num", style: "width:52px;flex:none;text-align:right;font-size:12px;font-weight:600" }, it.display != null ? it.display : String(it.value)));
-      row.addEventListener("mousemove", function (e) { chartTip(e.clientX, e.clientY, [it.label, (it.display != null ? it.display : it.value) + (opts.unit ? " " + opts.unit : "")]); });
+      var fill = h("i", {});
+      fill.style.width = Math.round(100 * it.value / max) + "%";
+      if (it.color) fill.style.setProperty("--bar", it.color);
+      var row = h("div", { class: "bar-row" },
+        h("span", { class: "bar-label" }, it.icon || null, h("span", {}, it.label)),
+        h("span", { class: "bar-track" }, fill),
+        h("span", { class: "bar-value" }, it.display != null ? it.display : String(it.value)));
+      row.addEventListener("mousemove", function (e) { chartTip(e.clientX, e.clientY - 4, [it.label, (it.display != null ? it.display : it.value) + (opts.unit ? " " + opts.unit : "")]); });
       row.addEventListener("mouseleave", function () { chartTip(0, 0, null); });
       wrap.appendChild(row);
     });
     return wrap;
   }
+  function tone(color, ic) { var x = icon(ic, 14); x.style.color = color; return x; }
 
   function onTimeRate(tasks) {
     var withDue = tasks.filter(function (t) { return t.status === "done" && t.dueDate; });
@@ -116,17 +152,17 @@
     var fbar = h("div", { class: "fbar" });
     // só o administrador enxerga mais de uma organização
     if (PF.me().roleId === "admin") {
-      fbar.appendChild(PF.select([{ value: "", label: "Todas as organizações" }].concat(PF.db.orgs.map(function (o) { return { value: o.id, label: o.name }; })),
-        insF.orgId, function (v) { insF.orgId = v; insF.projectId = ""; PF.refresh(); }, { "aria-label": "Organização" }));
+      fbar.appendChild(PF.filterSelect("Organização", [{ value: "", label: "Todas" }].concat(PF.db.orgs.map(function (o) { return { value: o.id, label: o.name }; })),
+        insF.orgId, function (v) { insF.orgId = v; insF.projectId = ""; PF.refresh(); }));
     } else insF.orgId = "";
-    fbar.appendChild(PF.select([{ value: "", label: "Todos os projetos" }].concat(scopeProjects(true).map(function (p) { return { value: p.id, label: p.name }; })),
-      insF.projectId, function (v) { insF.projectId = v; PF.refresh(); }, { "aria-label": "Projeto" }));
-    fbar.appendChild(PF.select([{ value: "", label: "Todas as equipes" }].concat(PF.scopeTeams().map(function (t) { return { value: t.id, label: t.name }; })),
-      insF.teamId, function (v) { insF.teamId = v; PF.refresh(); }, { "aria-label": "Equipe" }));
-    fbar.appendChild(PF.select([
+    fbar.appendChild(PF.filterSelect("Projeto", [{ value: "", label: "Todos" }].concat(scopeProjects(true).map(function (p) { return { value: p.id, label: p.name }; })),
+      insF.projectId, function (v) { insF.projectId = v; PF.refresh(); }));
+    fbar.appendChild(PF.filterSelect("Equipe", [{ value: "", label: "Todas" }].concat(PF.scopeTeams().map(function (t) { return { value: t.id, label: t.name }; })),
+      insF.teamId, function (v) { insF.teamId = v; PF.refresh(); }));
+    fbar.appendChild(PF.filterSelect("Período", [
       { value: "30", label: "Últimos 30 dias" }, { value: "60", label: "Últimos 60 dias" },
       { value: "90", label: "Últimos 90 dias" }, { value: "180", label: "Últimos 180 dias" }
-    ], String(insF.period), function (v) { insF.period = +v; PF.refresh(); }, { "aria-label": "Período" }));
+    ], String(insF.period), function (v) { insF.period = +v; PF.refresh(); }, null, { def: "90" }));
     if (insF.orgId || insF.projectId || insF.teamId) {
       fbar.appendChild(h("button", { class: "btn btn-ghost btn-sm", onclick: function () { insF.orgId = insF.projectId = insF.teamId = ""; PF.refresh(); } }, icon("x", 12), "Limpar"));
     }
@@ -167,22 +203,7 @@
       var late = tasks.filter(PF.isOverdue);
       var rate = onTimeRate(tasks);
 
-      var strip = h("div", { class: "stat-strip", style: "margin-bottom:14px" });
-      function stat(lbl, val, ctx, cls) {
-        strip.appendChild(h("div", { class: "stat" }, h("div", { class: "lbl" }, lbl), h("div", { class: "val" }, String(val)), ctx ? h("div", { class: "ctx " + (cls || "") }, ctx) : null));
-      }
-      stat("Projetos ativos", projects.filter(function (p) { return p.status === "active"; }).length, PF.plural(projects.length, "projeto nos filtros", "projetos nos filtros"));
-      stat("Projetos concluídos", projects.filter(function (p) { return p.status === "done"; }).length);
-      var atRisk = projects.filter(function (p) { return p.status === "active" && PF.projectRisk(p).level === "high"; }).length;
-      stat("Projetos em risco", atRisk, atRisk ? "exigem atenção" : "nenhum", atRisk ? "bad" : "good");
-      stat("Tarefas concluídas", doneP.length, "últimos " + insF.period + " dias");
-      stat("Tarefas atrasadas", late.length, "em aberto hoje", late.length ? "bad" : "good");
-      stat("Cumprimento de prazos", rate == null ? "—" : rate + "%", "tarefas concluídas no prazo", rate != null && rate < 70 ? "bad" : "");
-      page.appendChild(strip);
-
-      var grid = h("div", { class: "grid c2" });
-
-      // evolução das entregas (semana a semana)
+      // série semanal de conclusões (usada no KPI e no gráfico de evolução)
       var weeks = Math.min(13, Math.max(6, Math.round(insF.period / 7)));
       var buckets = [];
       for (var wgi = weeks - 1; wgi >= 0; wgi--) {
@@ -194,9 +215,31 @@
         }).length;
         buckets.push({ label: PF.fmtDate(new Date(end).toISOString()), y: n });
       }
+
+      var strip = h("div", { class: "stat-strip" });
+      function stat(ic, lbl, val, ctx, cls, spark) {
+        strip.appendChild(h("div", { class: "stat" }, h("div", { class: "lbl" }, icon(ic, 14), lbl),
+          h("div", { class: "stat-row" }, h("div", { class: "val" }, String(val)), spark || null),
+          ctx ? h("div", { class: "ctx " + (cls || "") }, ctx) : null));
+      }
+      stat("folders", "Projetos ativos", projects.filter(function (p) { return p.status === "active"; }).length, PF.plural(projects.length, "projeto nos filtros", "projetos nos filtros"));
+      stat("flag", "Projetos concluídos", projects.filter(function (p) { return p.status === "done"; }).length, "entregues");
+      var atRisk = projects.filter(function (p) { return p.status === "active" && PF.projectRisk(p).level === "high"; }).length;
+      stat("alert", "Projetos em risco", atRisk, atRisk ? "exigem atenção" : "nenhum", atRisk ? "bad" : "good");
+      stat("check2", "Tarefas concluídas", doneP.length, "últimos " + insF.period + " dias", "", PF.sparkline(buckets.map(function (b) { return b.y; })));
+      stat("clock", "Tarefas atrasadas", late.length, "em aberto hoje", late.length ? "bad" : "good");
+      stat("target", "Cumprimento de prazos", rate == null ? "—" : rate + "%", "tarefas concluídas no prazo", rate != null && rate < 70 ? "bad" : "");
+      page.appendChild(strip);
+
+      var grid = h("div", { class: "grid c2" });
+
+      // evolução das entregas (semana a semana)
+      var totalW = buckets.reduce(function (acc, b) { return acc + b.y; }, 0);
       var p1 = h("div", { class: "panel" },
-        h("div", { class: "panel-head" }, h("h3", {}, "Evolução das conclusões"), h("span", { class: "spacer" }), h("span", { class: "subtle", style: "font-size:11.5px" }, "tarefas concluídas por semana")),
-        h("div", { class: "panel-body" }, lineChart(buckets, { label: "Tarefas concluídas por semana", unit: "concluídas" })));
+        h("div", { class: "panel-head" }, h("h3", {}, "Evolução das conclusões"), h("span", { class: "spacer" }), h("span", { class: "subtle t12" }, "por semana")),
+        h("div", { class: "panel-body" },
+          h("div", { class: "chart-head" }, h("span", { class: "big" }, String(totalW)), h("span", { class: "muted" }, "tarefas concluídas em " + weeks + " semanas · média " + (totalW / weeks).toFixed(1).replace(".", ",") + "/semana")),
+          lineChart(buckets, { label: "Tarefas concluídas por semana: " + buckets.map(function (b) { return b.label + " " + b.y; }).join(", "), unit: "concluídas" })));
       grid.appendChild(p1);
 
       // distribuição por status: cor do status, sempre com glifo + rótulo (nunca cor sozinha)
@@ -212,10 +255,10 @@
       var p3 = h("div", { class: "panel" },
         h("div", { class: "panel-head" }, h("h3", {}, "Projetos por situação")));
       var situ = [
-        { label: "Saudáveis", icon: h("span", { style: "color:var(--ok);display:inline-flex" }, icon("check", 13)), color: "var(--ok)", value: 0 },
-        { label: "Atenção", icon: h("span", { style: "color:var(--warn);display:inline-flex" }, icon("alert", 13)), color: "var(--warn)", value: 0 },
-        { label: "Em risco", icon: h("span", { style: "color:var(--danger);display:inline-flex" }, icon("alert", 13)), color: "var(--danger)", value: 0 },
-        { label: "Entregues", icon: h("span", { style: "color:var(--ink-3);display:inline-flex" }, icon("flag", 13)), color: "var(--ink-3)", value: 0 }
+        { label: "Saudáveis", icon: tone("var(--ok)", "check"), color: "var(--ok)", value: 0 },
+        { label: "Atenção", icon: tone("var(--warn)", "info"), color: "var(--warn)", value: 0 },
+        { label: "Em risco", icon: tone("var(--danger)", "alert"), color: "var(--danger)", value: 0 },
+        { label: "Entregues", icon: tone("var(--ink-3)", "flag"), color: "var(--ink-3)", value: 0 }
       ];
       projects.forEach(function (p) {
         if (p.status === "done") { situ[3].value++; return; }
@@ -229,12 +272,13 @@
 
       // cumprimento de prazo por equipe
       var p4 = h("div", { class: "panel" },
-        h("div", { class: "panel-head" }, h("h3", {}, "Prazos por equipe"), h("span", { class: "spacer" }), h("span", { class: "subtle", style: "font-size:11.5px" }, "% de tarefas concluídas no prazo")));
+        h("div", { class: "panel-head" }, h("h3", {}, "Prazos por equipe"), h("span", { class: "spacer" }), h("span", { class: "subtle t12" }, "% de tarefas concluídas no prazo")));
       var teamItems = [];
       PF.scopeTeams().forEach(function (tm) {
         var tts = tasks.filter(function (t) { return t.teamId === tm.id; });
         var r = onTimeRate(tts);
-        if (r != null) teamItems.push({ label: tm.name, value: r, display: r + "%" });
+        // abaixo de 70% no prazo a barra fica em atenção (o valor em texto acompanha)
+        if (r != null) teamItems.push({ label: tm.name, value: r, display: r + "%", color: r < 70 ? "var(--warn)" : null });
       });
       teamItems.sort(function (a, b) { return b.value - a.value; });
       p4.appendChild(h("div", { class: "panel-body" }, teamItems.length ? barList(teamItems, { label: "Cumprimento de prazos por equipe", labelW: 130 }) : PF.emptyState("calendar", "Sem tarefas concluídas com prazo", "Conclua tarefas com prazo definido para medir o cumprimento.", null, { compact: true })));
@@ -242,7 +286,7 @@
       page.appendChild(grid);
 
       // resumo por equipe + atividades
-      var grid2 = h("div", { class: "grid c2-1", style: "margin-top:14px" });
+      var grid2 = h("div", { class: "grid c2-1 mt" });
       var pt = h("div", { class: "panel" });
       pt.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Resumo por equipe")));
       var tbl = h("table", { class: "tbl" },
@@ -259,7 +303,7 @@
           h("td", {}, tm.name),
           h("td", { class: "num" }, String(open)),
           h("td", { class: "num" }, String(done)),
-          h("td", { class: "num" }, lateN ? h("span", { style: "color:var(--danger);font-weight:600" }, String(lateN)) : "0"),
+          h("td", { class: "num" }, lateN ? h("span", { class: "text-danger" }, String(lateN)) : h("span", { class: "subtle" }, "0")),
           h("td", { class: "num" }, r == null ? "—" : r + "%")));
       });
       tbl.appendChild(tb);
@@ -271,11 +315,9 @@
         PF.can("audit.view") ? h("button", { class: "btn btn-ghost btn-sm", onclick: function () { PF.navigate("/insights/audit"); } }, "Auditoria", icon("arrowR", 12)) : null));
       var paB = h("div", { class: "panel-body" });
       var ids = {}; projects.forEach(function (p) { ids[p.id] = 1; });
-      PF.db.audit.filter(function (a) { return a.action !== "denied" && (a.projectId ? ids[a.projectId] : PF.canSeeAudit(a)); }).slice(0, 7).forEach(function (a) {
-        var u = PF.user(a.userId);
-        paB.appendChild(h("div", { class: "hist-item" },
-          PF.avatarEl(u, "sm"), h("span", { class: "grow" }, h("b", {}, u ? u.name : "?"), " " + a.summary), h("time", {}, PF.rel(a.ts))));
-      });
+      var insActs = PF.db.audit.filter(function (a) { return a.action !== "denied" && (a.projectId ? ids[a.projectId] : PF.canSeeAudit(a)); }).slice(0, 7);
+      if (insActs.length) paB.appendChild(PF.ui.activityFeed(insActs));
+      else paB.appendChild(PF.emptyState("pulse", "Sem atividade nos filtros", "Ajuste os filtros para ver as ações recentes.", null, { compact: true }));
       pa.appendChild(paB);
       grid2.appendChild(pa);
       page.appendChild(grid2);
@@ -294,7 +336,7 @@
       var tasks = scopeTasks();
 
       // comparação de projetos
-      var pc = h("div", { class: "panel", style: "margin-bottom:14px" });
+      var pc = h("div", { class: "panel mb" });
       pc.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Comparação de projetos")));
       var tbl = h("table", { class: "tbl" },
         h("thead", {}, h("tr", {}, h("th", {}, "Projeto"), h("th", {}, "Progresso"),
@@ -308,13 +350,13 @@
         var blockedN = ts.filter(PF.isBlocked).length;
         var r = onTimeRate(ts);
         tb.appendChild(h("tr", { class: "row-click", onclick: function () { PF.navigate("/projects/" + p.id); } },
-          h("td", {}, h("a", { href: "#/projects/" + p.id, class: "row-link", style: PF.ROWLINK_STYLE }, h("b", {}, p.name)), h("div", { class: "mono subtle", style: "font-size:10.5px" }, p.key)),
-          h("td", {}, h("div", { style: "display:flex;gap:8px;align-items:center" }, PF.progressBar(prog, prog === 100, "Progresso de " + p.name), h("span", { class: "num muted", style: "font-size:11.5px", "aria-hidden": "true" }, prog + "%"))),
+          h("td", {}, h("div", { class: "cell-main" }, PF.projectDot(p, true), h("div", {}, h("a", { href: "#/projects/" + p.id, class: "row-link" }, p.name), h("span", { class: "cell-sub mono" }, p.key)))),
+          h("td", {}, h("div", { class: "cell-prog" }, PF.progressBar(prog, prog === 100, "Progresso de " + p.name), h("span", { class: "pct", "aria-hidden": "true" }, prog + "%"))),
           h("td", { class: "num" }, String(ts.length)),
-          h("td", { class: "num" }, lateN ? h("span", { style: "color:var(--danger);font-weight:600" }, String(lateN)) : "0"),
-          h("td", { class: "num" }, blockedN ? h("span", { style: "color:var(--warn);font-weight:600" }, String(blockedN)) : "0"),
+          h("td", { class: "num" }, lateN ? h("span", { class: "text-danger" }, String(lateN)) : h("span", { class: "subtle" }, "0")),
+          h("td", { class: "num" }, blockedN ? h("span", { class: "text-warn" }, String(blockedN)) : h("span", { class: "subtle" }, "0")),
           h("td", { class: "num" }, r == null ? "—" : r + "%"),
-          h("td", { class: "nowrap" }, PF.fmtDate(p.targetDate)),
+          h("td", { class: "date" }, PF.fmtDate(p.targetDate)),
           h("td", {}, PF.ui.riskChip(PF.projectRisk(p)))));
       });
       tbl.appendChild(tb);
@@ -335,11 +377,11 @@
         var done = ts.filter(function (t) { return t.status === "done"; }).length;
         var pct = ts.length ? Math.round(100 * done / ts.length) : 0;
         tb2.appendChild(h("tr", {},
-          h("td", {}, h("b", {}, sp.name), h("div", { class: "subtle", style: "font-size:10.5px" }, PF.project(sp.projectId).name)),
+          h("td", {}, h("b", {}, sp.name), h("span", { class: "cell-sub" }, PF.project(sp.projectId).name)),
           h("td", {}, sp.status === "active" ? h("span", { class: "chip accent" }, "Ativa") : sp.status === "done" ? h("span", { class: "chip ok" }, "Concluída") : h("span", { class: "chip" }, "Planejada")),
           h("td", { class: "num" }, String(ts.length)),
           h("td", { class: "num" }, String(done)),
-          h("td", {}, h("div", { style: "display:flex;gap:8px;align-items:center" }, PF.progressBar(pct, pct === 100, "Conclusão da " + sp.name), h("span", { class: "num muted", style: "font-size:11.5px", "aria-hidden": "true" }, pct + "%")))));
+          h("td", {}, h("div", { class: "cell-prog" }, PF.progressBar(pct, pct === 100, "Conclusão da " + sp.name), h("span", { class: "pct", "aria-hidden": "true" }, pct + "%")))));
       });
       tbl2.appendChild(tb2);
       ps.appendChild(h("div", { class: "tbl-wrap" }, tbl2));
@@ -347,7 +389,7 @@
 
       // progresso por equipe
       var pt = h("div", { class: "panel" });
-      pt.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Progresso por equipe"), h("span", { class: "spacer" }), h("span", { class: "subtle", style: "font-size:11.5px" }, "% de tarefas concluídas")));
+      pt.appendChild(h("div", { class: "panel-head" }, h("h3", {}, "Progresso por equipe"), h("span", { class: "spacer" }), h("span", { class: "subtle t12" }, "% de tarefas concluídas")));
       var teamItems = [];
       PF.scopeTeams().forEach(function (tm) {
         var ts = tasks.filter(function (t) { return t.teamId === tm.id; });
@@ -360,7 +402,7 @@
       grid.appendChild(pt);
       page.appendChild(grid);
 
-      var grid2 = h("div", { class: "grid c2", style: "margin-top:14px" });
+      var grid2 = h("div", { class: "grid c2 mt" });
 
       // gargalos
       var pg = h("div", { class: "panel" });
@@ -369,9 +411,9 @@
       var wip = tasks.filter(function (t) { return t.status === "in_progress"; });
       var review = tasks.filter(function (t) { return t.status === "in_review"; });
       pgB.appendChild(barList([
-        { label: "Em andamento", icon: PF.statusIcon("in_progress", 13), value: wip.length },
-        { label: "Em revisão", icon: PF.statusIcon("in_review", 13), value: review.length },
-        { label: "Bloqueadas", icon: h("span", { style: "color:var(--warn);display:inline-flex" }, icon("block", 13)), value: tasks.filter(PF.isBlocked).length }
+        { label: "Em andamento", icon: PF.statusIcon("in_progress", 13), color: PF.STATUS_META.in_progress.color, value: wip.length },
+        { label: "Em revisão", icon: PF.statusIcon("in_review", 13), color: PF.STATUS_META.in_review.color, value: review.length },
+        { label: "Bloqueadas", icon: tone("var(--warn)", "block"), color: "var(--warn)", value: tasks.filter(PF.isBlocked).length }
       ], { label: "Trabalho em progresso", labelW: 130, unit: "tarefas" }));
       var load = {};
       wip.forEach(function (t) { if (t.assigneeId) load[t.assigneeId] = (load[t.assigneeId] || 0) + 1; });
@@ -381,7 +423,7 @@
         top.forEach(function (uid) {
           pgB.appendChild(h("div", { class: "hist-item" }, PF.avatarEl(PF.user(uid), "sm"),
             h("span", { class: "grow" }, PF.user(uid).name),
-            h("span", { class: "num", style: load[uid] >= 3 ? "color:var(--danger);font-weight:600" : "" }, load[uid] + " tarefas")));
+            h("span", { class: "num" + (load[uid] >= 3 ? " text-danger" : "") }, load[uid] + " tarefas")));
         });
       }
       pg.appendChild(pgB);
@@ -396,11 +438,11 @@
       blocked.forEach(function (t) {
         var blockers = PF.activeBlockers(t);
         pdB.appendChild(h("div", { class: "hist-item" },
-          h("span", { style: "color:var(--warn)" }, icon("block", 14)),
+          tone("var(--warn)", "block"),
           h("span", { class: "grow" },
             h("a", { href: "#", class: "mono", onclick: function (e) { e.preventDefault(); PF.ui.openTask(t.id); } }, t.ref),
             " " + t.title,
-            h("div", { class: "subtle", style: "font-size:11px" }, "aguarda " + blockers.map(function (b) { return b.ref + " (" + PF.STATUS_META[b.status].label + ")"; }).join(", "))),
+            h("div", { class: "subtle t12" }, "aguarda " + blockers.map(function (b) { return b.ref + " (" + PF.STATUS_META[b.status].label + ")"; }).join(", "))),
           PF.isOverdue(t) ? h("span", { class: "chip danger" }, "Atrasada") : null));
       });
       pd.appendChild(pdB);
@@ -428,18 +470,18 @@
       if (audF.userId && !PF.scopeUsers().some(function (u) { return u.id === audF.userId; })) audF.userId = "";
       if (audF.projectId && !PF.db.projects.some(function (p) { return p.id === audF.projectId && PF.inMyOrg(p.orgId); })) audF.projectId = "";
       var fbar = h("div", { class: "fbar" });
-      fbar.appendChild(PF.select([{ value: "", label: "Todos os usuários" }].concat(PF.scopeUsers().map(function (u) { return { value: u.id, label: u.name }; })),
-        audF.userId, function (v) { audF.userId = v; audF.page = 0; PF.refresh(); }, { "aria-label": "Usuário" }));
-      fbar.appendChild(PF.select([{ value: "", label: "Todos os projetos" }].concat(PF.db.projects.filter(function (p) { return PF.inMyOrg(p.orgId); }).map(function (p) { return { value: p.id, label: p.name + (p.archived ? " (arquivado)" : "") }; })),
-        audF.projectId, function (v) { audF.projectId = v; audF.page = 0; PF.refresh(); }, { "aria-label": "Projeto" }));
-      fbar.appendChild(PF.select([{ value: "", label: "Todas as ações" }].concat(Object.keys(ACTION_LABELS).map(function (a) { return { value: a, label: ACTION_LABELS[a] }; })),
-        audF.action, function (v) { audF.action = v; audF.page = 0; PF.refresh(); }, { "aria-label": "Ação" }));
-      fbar.appendChild(PF.select([{ value: "", label: "Todas as origens" }].concat(Object.keys(PF.SOURCE_META).map(function (k) { return { value: k, label: PF.SOURCE_META[k] }; })),
-        audF.source, function (v) { audF.source = v; audF.page = 0; PF.refresh(); }, { "aria-label": "Origem" }));
-      fbar.appendChild(PF.select([{ value: "", label: "Todas as entidades" }].concat(Object.keys(ENTITY_LABELS).map(function (e) { return { value: e, label: ENTITY_LABELS[e] }; })),
-        audF.entityType, function (v) { audF.entityType = v; audF.page = 0; PF.refresh(); }, { "aria-label": "Entidade" }));
-      fbar.appendChild(PF.select([{ value: "7", label: "7 dias" }, { value: "30", label: "30 dias" }, { value: "90", label: "90 dias" }, { value: "365", label: "1 ano" }],
-        String(audF.period), function (v) { audF.period = +v; audF.page = 0; PF.refresh(); }, { "aria-label": "Período" }));
+      fbar.appendChild(PF.filterSelect("Usuário", [{ value: "", label: "Todos" }].concat(PF.scopeUsers().map(function (u) { return { value: u.id, label: u.name }; })),
+        audF.userId, function (v) { audF.userId = v; audF.page = 0; PF.refresh(); }));
+      fbar.appendChild(PF.filterSelect("Projeto", [{ value: "", label: "Todos" }].concat(PF.db.projects.filter(function (p) { return PF.inMyOrg(p.orgId); }).map(function (p) { return { value: p.id, label: p.name + (p.archived ? " (arquivado)" : "") }; })),
+        audF.projectId, function (v) { audF.projectId = v; audF.page = 0; PF.refresh(); }));
+      fbar.appendChild(PF.filterSelect("Ação", [{ value: "", label: "Todas" }].concat(Object.keys(ACTION_LABELS).map(function (a) { return { value: a, label: ACTION_LABELS[a] }; })),
+        audF.action, function (v) { audF.action = v; audF.page = 0; PF.refresh(); }));
+      fbar.appendChild(PF.filterSelect("Origem", [{ value: "", label: "Todas" }].concat(Object.keys(PF.SOURCE_META).map(function (k) { return { value: k, label: PF.SOURCE_META[k] }; })),
+        audF.source, function (v) { audF.source = v; audF.page = 0; PF.refresh(); }));
+      fbar.appendChild(PF.filterSelect("Entidade", [{ value: "", label: "Todas" }].concat(Object.keys(ENTITY_LABELS).map(function (e) { return { value: e, label: ENTITY_LABELS[e] }; })),
+        audF.entityType, function (v) { audF.entityType = v; audF.page = 0; PF.refresh(); }));
+      fbar.appendChild(PF.filterSelect("Período", [{ value: "7", label: "7 dias" }, { value: "30", label: "30 dias" }, { value: "90", label: "90 dias" }, { value: "365", label: "1 ano" }],
+        String(audF.period), function (v) { audF.period = +v; audF.page = 0; PF.refresh(); }, null, { def: "90" }));
       if (audF.userId || audF.projectId || audF.action || audF.source || audF.entityType) {
         fbar.appendChild(h("button", { class: "btn btn-ghost btn-sm", onclick: function () { audF.userId = audF.projectId = audF.action = audF.source = audF.entityType = ""; audF.page = 0; PF.refresh(); } }, icon("x", 12), "Limpar"));
       }
@@ -470,13 +512,13 @@
       slice.forEach(function (a) {
         var proj = a.projectId ? PF.project(a.projectId) : null;
         tb.appendChild(h("tr", { class: "row-click", onclick: function () { auditDrawer(a.id); } },
-          h("td", { class: "nowrap muted", style: "font-size:11.5px" }, PF.fmtDateTime(a.ts)),
+          h("td", { class: "nowrap muted t12" }, PF.fmtDateTime(a.ts)),
           h("td", {}, PF.whoCell(a.userId)),
           h("td", {}, h("span", { class: "chip" + (a.action === "denied" ? " danger" : a.action === "delete" ? " warn" : "") }, ACTION_LABELS[a.action] || a.action)),
           h("td", {}, ENTITY_LABELS[a.entityType] || a.entityType),
           h("td", {}, proj ? proj.name : "—"),
           h("td", {}, h("span", { class: "src-tag " + a.source }, PF.sourceLabel(a.source))),
-          h("td", { style: "max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, h("button", { type: "button", class: "row-link", style: PF.ROWLINK_STYLE, title: a.summary }, a.summary))));
+          h("td", { class: "cell-trunc" }, h("button", { type: "button", class: "row-link", title: a.summary }, a.summary))));
       });
       tbl.appendChild(tb);
       var panel = h("div", { class: "panel" }, h("div", { class: "tbl-wrap" }, tbl));
@@ -513,7 +555,7 @@
     var proj = a.projectId ? PF.project(a.projectId) : null;
     var dr = PF.drawer({
       label: "Registro de auditoria",
-      head: h("div", { style: "display:flex;gap:8px;align-items:center" }, icon("scroll", 16), h("b", {}, ACTION_LABELS[a.action] || a.action)),
+      head: h("h2", { class: "drawer-title" }, icon("scroll", 16), h("b", {}, ACTION_LABELS[a.action] || a.action)),
       body: h("div")
     });
     var body = dr.body;
@@ -555,7 +597,7 @@
       body.appendChild(h("pre", { class: "code" }, JSON.stringify({ id: ev.id, type: ev.type, occurredAt: ev.ts, data: ev.payload }, null, 2)));
     }
     if (a.entityType === "task" && PF.task(a.entityId)) {
-      body.appendChild(h("div", { style: "margin-top:12px" },
+      body.appendChild(h("div", { class: "mt-3" },
         h("button", { class: "btn btn-sm", onclick: function () { PF.ui.openTask(a.entityId); } }, "Abrir tarefa", icon("arrowR", 12))));
     }
   }
