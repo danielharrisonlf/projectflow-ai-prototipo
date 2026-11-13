@@ -23,17 +23,17 @@ protótipo funciona normalmente com a fonte do sistema.
 ## Telas disponíveis
 
 **ProjectFlow Workspace**
-- Início (dashboard operacional com filtros por período, projeto, equipe e responsável)
-- Meus projetos · detalhe do projeto (visão geral, tarefas, membros, configurações)
+- Início (dashboard operacional: KPIs com tendência, filtros rotulados por período, projeto, equipe e responsável)
+- Projetos (favoritos por pessoa, filtro de status com **Arquivados** e ação **Desarquivar** para quem pode arquivar) · detalhe do projeto (visão geral, tarefas, membros, configurações)
 - Minhas tarefas · Equipes
-- Kanban (drag-and-drop, filtros combinados, criação rápida, indicadores de atraso/bloqueio)
-- Backlog · Sprints (planejar, iniciar, encerrar, associar tarefas) · Cronograma (gantt com marcos)
+- Kanban (drag-and-drop ou **Alt+←/→** no card focado, filtros em chips removíveis pelo botão Filtro, ordenação, criação rápida, indicadores de atraso/bloqueio)
+- Backlog · Sprints (planejar, iniciar, encerrar, associar tarefas; **uma sprint ativa por projeto**) · Cronograma (gantt com marcos)
 - Assistente de IA (análises + planejamento assistido com proposta revisável)
 - Agentes MCP (ferramentas, console de teste, agentes, histórico de execuções)
-- Webhooks (assinaturas, segredo HMAC, histórico de entregas com tentativas e reenvio, catálogo de eventos)
-- Notificações (histórico multicanal, preferências, templates, provedores)
+- Webhooks (assinaturas, segredo HMAC, **Histórico de envios** com tentativas e reenvio, catálogo de eventos)
+- Notificações (histórico multicanal, preferências, templates, provedores). Cada pessoa vê as notificações enviadas a ela; Administrador e perfis com auditoria (Gestor, Visualizador/Auditor) veem as de toda a organização
 - Usuários e permissões (convites, papéis, matriz de capacidades)
-- Configurações (tema, arquitetura simulada, restauração dos dados)
+- Configurações (tema, arquitetura simulada, restauração dos dados — só Administrador)
 
 **ProjectFlow Insights**
 - Visão executiva (KPIs, evolução de entregas, distribuição por status, situação dos projetos, prazos por equipe)
@@ -42,7 +42,8 @@ protótipo funciona normalmente com a fonte do sistema.
 
 ## Perfis de demonstração
 
-Troque pelo seletor no canto superior direito — sem recarregar a página:
+Troque pelo seletor no canto superior direito — sem recarregar a página. Favoritos são
+preferência de cada pessoa (não geram auditoria):
 
 | Perfil | Usuário | O que muda |
 |---|---|---|
@@ -54,6 +55,16 @@ Troque pelo seletor no canto superior direito — sem recarregar a página:
 
 As operações validam a permissão de fato (não apenas escondem botões); tentativas
 negadas geram toast e registro na auditoria.
+
+## Atalhos de teclado
+
+| Atalho | Onde | Ação |
+|---|---|---|
+| `Ctrl+K` / `⌘K` | qualquer tela | foca a busca global (setas navegam nos resultados) |
+| `Enter` / `Espaço` | card do Kanban | abre o painel da tarefa |
+| `Alt+←` / `Alt+→` | card do Kanban | move a tarefa para a coluna vizinha |
+| `Ctrl+Enter` / `⌘Enter` | modal Nova tarefa, comentário | cria a tarefa / envia o comentário |
+| `Esc` | menu, painel, modal | fecha só a camada do topo |
 
 ## Fluxos implementados (cenários A–G do briefing)
 
@@ -76,11 +87,12 @@ negadas geram toast e registro na auditoria.
 
 Todo o estado vive no `localStorage` (`projectflow.db.v1`) e sobrevive ao reload.
 **Configurações → Dados da demonstração → Restaurar dados de demonstração** volta ao
-cenário inicial (também disponível no rodapé da sidebar). Há exportação do estado em JSON.
+cenário inicial. A ação exige o perfil **Administrador** e uma confirmação; o atalho no
+rodapé da sidebar só aparece para ele. Há exportação do estado em JSON.
 
 ## Limitações conhecidas
 
-- Drag-and-drop usa a API HTML5 (desktop); no toque, mova tarefas pelo seletor de status no drawer.
+- Drag-and-drop usa a API HTML5 (desktop); no toque, mova tarefas pela propriedade Status no painel da tarefa.
 - A IA usa casamento de intenções por palavras-chave; briefings fora dos padrões caem na proposta genérica de backlog.
 - Busca global cobre títulos/refs de tarefas e projetos (não comentários).
 - Sem colaboração multiusuário real — o "usuário atual" é o perfil simulado selecionado.
