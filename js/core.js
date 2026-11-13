@@ -256,11 +256,21 @@
     key: '<circle cx="8" cy="14" r="4"/><path d="m11 11 8-8M16 6l2.5 2.5M13.5 8.5 16 11"/>',
     building: '<rect x="5" y="4" width="14" height="16" rx="1"/><path d="M9 8h2M13 8h2M9 12h2M13 12h2M9 16h2M13 16h2"/>',
     briefcase: '<rect x="4" y="8" width="16" height="11" rx="2"/><path d="M9 8V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M4 13h16"/>',
-    download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M5 19h14"/>'
+    download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M5 19h14"/>',
+    hash: '<path d="M9 4 7 20M17 4l-2 16M4.5 9h16M3.5 15h16"/>',
+    clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+    trendUp: '<path d="m4 16 5-5 4 4 7-7"/><path d="M15 8h5v5"/>',
+    trendDown: '<path d="m4 8 5 5 4-4 7 7"/><path d="M15 16h5v-5"/>',
+    check2: '<circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.2 2.4 2.4 4.6-4.8"/>',
+    layers: '<path d="m12 4 8.5 4.5L12 13 3.5 8.5z"/><path d="m3.5 12.5 8.5 4.5 8.5-4.5"/><path d="m3.5 16.5 8.5 4.5 8.5-4.5"/>',
+    logo: '<path d="M8 19.5V5h6.2a4.6 4.6 0 0 1 0 9.2H11.4" stroke-width="2.4"/>',
+    cmd: '<path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z"/>',
+    user: '<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.8-3.7 3.6-5.5 7-5.5s6.2 1.8 7 5.5"/>'
   };
   PF.icon = function (name, size) {
     size = size || 16;
     var span = document.createElement("span");
+    span.className = "ico";
     span.style.cssText = "display:inline-flex;flex:none";
     span.innerHTML = '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (IC[name] || IC.info) + "</svg>";
     return span;
@@ -330,16 +340,29 @@
     return s;
   };
 
+  /* cores categóricas: o dado guarda um hex da paleta clara; a interface usa o
+     token --cat-N correspondente (tematizado nos dois temas). Hex fora da paleta
+     cai num índice estável derivado do próprio valor. */
+  var CAT_HEX = ["#2B5FD9", "#6D4FC4", "#0E7490", "#1D7A4C", "#9A5B00", "#BE3030", "#B23A78", "#4A6572", "#7A5C2E", "#3D7068"];
+  PF.catVar = function (hex) {
+    var key = String(hex || "").toUpperCase();
+    var i = CAT_HEX.indexOf(key);
+    if (i < 0) { var n = 0; for (var k = 0; k < key.length; k++) n = (n * 31 + key.charCodeAt(k)) >>> 0; i = n % CAT_HEX.length; }
+    return "var(--cat-" + (i + 1) + ")";
+  };
   PF.avatarEl = function (user, size) {
     if (!user) {
-      var ghost = h("span", { class: "avatar " + (size || ""), "data-tip": "Sem responsável", role: "img", "aria-label": "Sem responsável" });
-      ghost.style.background = "var(--surface-2)";
-      ghost.style.border = "1px dashed var(--border-2)";
-      return ghost;
+      return h("span", { class: "avatar none " + (size || ""), "data-tip": "Sem responsável", role: "img", "aria-label": "Sem responsável" });
     }
     var a = h("span", { class: "avatar " + (size || ""), "data-tip": user.name, role: "img", "aria-label": user.name }, user.initials);
-    a.style.setProperty("--av", user.color);
+    a.style.setProperty("--av", PF.catVar(user.color));
     return a;
+  };
+  // ponto de cor de projeto (token categórico)
+  PF.projectDot = function (p, lg) {
+    var d = h("span", { class: "dot" + (lg ? " lg" : ""), "aria-hidden": "true" });
+    d.style.setProperty("--dot", PF.catVar(p && p.color));
+    return d;
   };
   PF.whoCell = function (userId) {
     var u = PF.user(userId);
@@ -360,9 +383,9 @@
   PF.sourceLabel = function (src) { return PF.SOURCE_META[src] || src; };
   PF.plural = function (n, one, many) { return n + " " + (n === 1 ? one : many); };
   PF.labelChip = function (name) {
-    var colors = { backend: "#2B5FD9", frontend: "#B23A78", mobile: "#6D4FC4", infra: "#0E7490", dados: "#9A5B00", ux: "#3D7068", seguranca: "#BE3030", performance: "#7A5C2E", documentacao: "#4A6572", cliente: "#1D7A4C" };
+    var cat = { backend: 1, frontend: 7, mobile: 2, infra: 3, dados: 5, ux: 10, seguranca: 6, performance: 9, documentacao: 8, cliente: 4 };
     var c = h("span", { class: "label-chip" }, PF.labelName(name));
-    c.style.setProperty("--lc", colors[name] || "var(--ink-3)");
+    c.style.setProperty("--lc", cat[name] ? "var(--cat-" + cat[name] + ")" : "var(--ink-3)");
     return c;
   };
 
@@ -1417,7 +1440,7 @@
     if (opts.foot) { var f = h("div", { class: "drawer-foot" }); append(f, opts.foot); dr.appendChild(f); }
     var bd = h("div", { class: "backdrop", onclick: close });
     overlays().append(bd, dr);
-    layer = PF.pushLayer({ kind: "drawer", el: dr, parts: [bd], trigger: trigger, teardown: function () { bd.remove(); dr.remove(); PF._drawerRefresh = null; } });
+    layer = PF.pushLayer({ kind: "drawer", el: dr, parts: [bd], trigger: trigger, onClose: opts.onClose, teardown: function () { bd.remove(); dr.remove(); PF._drawerRefresh = null; } });
     if (triggerKey) layer.triggerKey = triggerKey;
     dr.focus();
     return { close: close, body: body, head: head, layer: layer };
@@ -1509,14 +1532,14 @@
     if (main) main.inert = PF._navOpen;
     if (burger) burger.setAttribute("aria-expanded", PF._navOpen ? "true" : "false");
     var closeBtn = sb && sb.querySelector(".sb-close");
-    if (closeBtn) closeBtn.style.display = PF._navOpen ? "" : "none";
+    if (closeBtn) closeBtn.hidden = !PF._navOpen;
   };
   PF.openNav = function () {
     if (PF._navOpen) return;
     closeMenu();
     PF._navOpen = true;
     var layer;
-    var bd = h("div", { class: "backdrop", style: "z-index:105", onclick: function () { PF.closeLayer(layer); } });
+    var bd = h("div", { class: "backdrop nav-backdrop", onclick: function () { PF.closeLayer(layer); } });
     overlays().appendChild(bd);
     layer = PF.pushLayer({
       kind: "nav", getEl: function () { return document.querySelector(".sidebar"); },
@@ -1524,7 +1547,7 @@
     });
     PF.applyNavState();
     var sb = document.querySelector(".sidebar");
-    var cur = sb && (sb.querySelector(".sb-item.active") || focusablesIn(sb)[0]);
+    var cur = sb && (sb.querySelector(".sb-item.active, .sb-item[aria-current=page]") || focusablesIn(sb)[0]);
     if (cur) cur.focus();
   };
   PF.closeNav = function (opts) { var l = layers.filter(function (x) { return x.kind === "nav"; })[0]; if (l) PF.closeLayer(l, opts); };
@@ -1558,8 +1581,8 @@
     }
     var t = h("div", { class: "toast " + kind },
       h("span", { class: "t-ic", "aria-hidden": "true" }, icon(icons[kind] || "info", 16)),
-      h("div", { class: "grow" }, h("b", {}, title, h("small", { class: "t-count num" })), msg ? h("span", {}, msg) : null),
-      h("button", { class: "btn btn-ghost btn-icon btn-sm toast-close", "aria-label": "Fechar aviso: " + title, style: "margin-left:auto;flex:none", onclick: dismiss }, icon("x", 12))
+      h("div", { class: "grow" }, h("b", {}, title, h("small", { class: "t-count" })), msg ? h("span", {}, msg) : null),
+      h("button", { class: "btn btn-ghost btn-icon btn-sm toast-close", "aria-label": "Fechar aviso: " + title, onclick: dismiss }, icon("x", 12))
     );
     t._key = key; t._count = 1;
     t._arm = function () { clearTimeout(timer); if (duration) timer = setTimeout(dismiss, duration); };
@@ -1575,7 +1598,8 @@
     return t;
   };
   // reset mínimo de <button> usado como link de linha (cor, peso e foco vêm de .row-link no CSS)
-  PF.ROWLINK_STYLE = "background:none;border:0;padding:0;margin:0;text-align:left;cursor:pointer";
+  // o reset agora vem de button.row-link no CSS; a constante fica vazia para os chamadores antigos
+  PF.ROWLINK_STYLE = "";
 
   // a Clipboard API devolve Promise: o aviso de sucesso só aparece quando a cópia acontece de fato
   PF.copyText = function (text, okTitle) {
@@ -1667,6 +1691,60 @@
       s.appendChild(opt);
     });
     return s;
+  };
+
+  /* filtro com rótulo visível: <label class="fsel"><span>Período</span><select></label>.
+     opts.def = valor "sem filtro" (padrão ""); diferente dele, o filtro aparece ativo (.is-set). */
+  PF.filterSelect = function (label, options, value, onChange, attrs, opts) {
+    opts = opts || {};
+    var sel = PF.select(options, value, onChange, Object.assign({ "aria-label": label }, attrs || {}));
+    var def = opts.def != null ? opts.def : "";
+    return h("label", { class: "fsel" + (String(value) !== String(def) ? " is-set" : "") }, h("span", { class: "fsel-l", "aria-hidden": "true" }, label), sel);
+  };
+
+  /* botão de propriedade do inspector: ícone + valor; abre um menu de escolha única.
+     o.label (nome da propriedade), o.options [{ value, label, node? }], o.value, o.onChange,
+     o.fk (chave de foco estável entre re-renderizações), o.empty (texto quando sem valor) */
+  PF.propButton = function (o) {
+    var cur = o.options.filter(function (x) { return x.value === o.value; })[0];
+    var isEmpty = !cur || !o.value;
+    var btn = h("button", {
+      type: "button", class: "prop-btn" + (isEmpty ? " is-empty" : ""), "data-fk": o.fk || null,
+      "aria-haspopup": "menu", "aria-expanded": "false",
+      "aria-label": o.label + ": " + (cur ? cur.label : (o.empty || "nenhum"))
+    },
+      cur && cur.node ? cur.node() : (o.icon ? icon(o.icon, 14) : null),
+      h("span", { class: "pv" }, cur ? cur.label : (o.empty || "—")),
+      h("span", { class: "chev", "aria-hidden": "true" }, icon("chevD", 12)));
+    btn.addEventListener("click", function () {
+      PF.menu(btn, [{ head: o.label }].concat(o.options.map(function (x) {
+        return { label: x.label, node: x.node ? x.node() : null, checked: x.value === o.value, radio: true,
+          onClick: function () { if (x.value !== o.value) o.onChange(x.value); } };
+      })), { label: o.label });
+    });
+    return btn;
+  };
+  // valor somente leitura com o mesmo desenho do botão de propriedade
+  PF.propValue = function (node, text, empty) {
+    return h("span", { class: "prop-val" + (empty ? " is-empty" : "") }, node || null, h("span", { class: "pv" }, text));
+  };
+
+  /* sparkline de uma série real (decorativa para o leitor: o número ao lado carrega a informação) */
+  PF.sparkline = function (values) {
+    var NS = "http://www.w3.org/2000/svg";
+    var W = 88, H = 28, pad = 3;
+    var max = Math.max(1, Math.max.apply(null, values)), n = values.length;
+    function x(i) { return pad + (n < 2 ? (W - 2 * pad) / 2 : i * (W - 2 * pad) / (n - 1)); }
+    function y(v) { return H - pad - (v / max) * (H - 2 * pad); }
+    var d = values.map(function (v, i) { return (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1); }).join(" ");
+    var svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    svg.setAttribute("class", "spark");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    svg.innerHTML = '<path class="sp-area" d="' + d + " L" + x(n - 1).toFixed(1) + " " + (H - pad) + " L" + x(0).toFixed(1) + " " + (H - pad) + ' Z"/>' +
+      '<path class="sp-line" d="' + d + '"/><circle class="sp-dot" r="2.5" cx="' + x(n - 1).toFixed(1) + '" cy="' + y(values[n - 1]).toFixed(1) + '"/>';
+    return svg;
   };
 
   PF.switchEl = function (checked, onChange, label) {
