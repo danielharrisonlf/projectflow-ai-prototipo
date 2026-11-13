@@ -595,7 +595,7 @@
 
   // ação de interface: apagar todo o estado exige o perfil administrador
   act.resetDemo = function () {
-    if (!PF.guard("user.manage", "restaurar os dados da demonstração")) return;
+    if (!PF.guard("user.manage", "restaurar os dados de demonstração")) return;
     PF.resetDemo();
   };
 

@@ -648,9 +648,9 @@
       var sortBtn = h("button", { class: "btn", "aria-haspopup": "menu", "aria-expanded": "false", "data-fk": "board-ordem", "aria-label": "Ordenar por " + SORT_LABEL[boardF.group] },
         icon("backlog", 14), h("span", { class: "subtle" }, "Ordenar:"), SORT_LABEL[boardF.group], icon("chevD", 12));
       sortBtn.addEventListener("click", function () {
-        PF.menu(sortBtn, [{ head: "Ordenar cards por" }].concat(["none", "priority", "due"].map(function (g) {
+        PF.menu(sortBtn, [{ head: "Ordenar tarefas por" }].concat(["none", "priority", "due"].map(function (g) {
           return { label: SORT_LABEL[g], checked: boardF.group === g, radio: true, onClick: function () { boardF.group = g; PF.refresh(); } };
-        })), { label: "Ordenar cards por" });
+        })), { label: "Ordenar tarefas por" });
       });
       vb.appendChild(sortBtn);
       page.appendChild(vb);

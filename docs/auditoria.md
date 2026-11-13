@@ -8,9 +8,10 @@ Validação independente: Chromium do Playwright, 1440 e 390 px (mais 1024 na va
 **Veredito da validação independente: aprovado pelo critério de pronto.** Não há achado crítico ou
 alto aberto. Os cenários A–G passam com os 5 perfis nos dois temas (59/59 verificações em cada tema).
 Nenhum erro de console apareceu em 930 estados de tela. O texto atinge AA em todos os estados medidos,
-e não sobrou valor fixo relevante fora dos tokens. Fica uma **regressão média**: a 1440 px a coluna
-"Concluído" do Kanban aparece cortada (UI-33 reaberto, ver §5). Há ainda 9 achados com correção
-parcial, todos de severidade média ou baixa.
+e não sobrou valor fixo relevante fora dos tokens. A validação achou uma regressão média (a coluna
+"Concluído" do Kanban cortada a 1440 px, que reabria o UI-33) e três pontos baixos. **Os quatro já
+foram corrigidos e verificados depois da validação; ver §6.** Ficam 8 achados com correção
+parcial, todos de severidade média ou baixa e justificados na §4.
 
 ### Achados originais por fonte e severidade
 
@@ -279,3 +280,16 @@ Nenhuma falha encontrada em: XSS (5 payloads em 12 pontos de entrada), payloads 
   largura (ex.: Kanban) mudam um pouco.
 - **Escopo da validação:** os 15 itens "Declarado" (texto, estados e consistência visual) foram aceitos
   com base no `status.md` e nas capturas, sem roteiro próprio. Nenhum deles é crítico ou alto.
+
+## 6. Correções pós-validação
+
+| ID | Correção | Verificação |
+|---|---|---|
+| VAL-01 / UI-33 | `.col { min-width: 216px }` em `styles.css`. As 5 colunas cabem em 1440 px. | `.board` com `scrollWidth 1152 = clientWidth 1152`; última coluna termina em x=1416, nos dois temas (`output/auditoria/validacao/fix-kanban-1440-{light,dark}.png`) |
+| VAL-02 | Chips de sugestão usam `--border-ctl` (hover em `--border-ctl-hover`). | Borda medida: 3.64:1 no claro e 3.54:1 no escuro |
+| VAL-03 | Atalho `n` incluído na tabela de atalhos do README. | — |
+| UI-60 / UI-63 (resíduo) | "Ordenar cards por" virou "Ordenar tarefas por". O rótulo de restauração ficou "Restaurar dados de demonstração" em todos os pontos. | `grep` sem ocorrências restantes |
+
+Regressões reexecutadas depois dessas correções: `f7-scenarios` (A–G) 16/16 PASS; `f0-sweep`
+(32 rotas × 5 perfis × temas × 390 px) TOTAL 0; `f2-layers` e `f6-components` sem erros; zero erros
+de console.

@@ -74,7 +74,7 @@
         if (window.console) console.error(e);
         page.replaceChildren(PF.emptyState("alert", "Não foi possível exibir esta tela",
           "Os dados desta demonstração parecem inconsistentes. Restaurar o cenário inicial resolve.",
-          h("button", { class: "btn btn-primary", onclick: function () { PF.resetDemo(); } }, icon("refresh", 14), "Restaurar dados da demonstração")));
+          h("button", { class: "btn btn-primary", onclick: function () { PF.resetDemo(); } }, icon("refresh", 14), "Restaurar dados de demonstração")));
       }
     }
     // títulos de painel ficam um nível abaixo do h1 da página (h3 mantém o estilo atual)
@@ -145,7 +145,7 @@
 
     if (PF.can("user.manage")) {
       sb.appendChild(h("div", { class: "sb-footer" },
-        h("button", { class: "sb-item", onclick: PF.ui.confirmReset }, icon("refresh", 16), h("span", { class: "grow" }, "Restaurar dados da demonstração"))
+        h("button", { class: "sb-item", onclick: PF.ui.confirmReset }, icon("refresh", 16), h("span", { class: "grow" }, "Restaurar dados de demonstração"))
       ));
     }
     return sb;

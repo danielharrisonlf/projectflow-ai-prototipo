@@ -1324,7 +1324,7 @@ a.list-item:hover, button.list-item:hover { background: var(--surface-hover); te
   padding-bottom: var(--space-2);
 }
 .col {
-  flex: 1 1 0; min-width: 232px; max-width: 340px;
+  flex: 1 1 0; min-width: 216px; max-width: 340px;
   display: flex; flex-direction: column; min-height: 0; max-height: 100%;
   background: var(--surface-2); border-radius: var(--radius-md);
   border: 1px solid var(--border);
@@ -1588,10 +1588,10 @@ a.list-item:hover, button.list-item:hover { background: var(--surface-hover); te
 /* sugestões são prompts, não ações: formato de chip */
 .chat-suggest .btn {
   height: auto; min-height: var(--control-h-sm); padding: var(--space-0) var(--space-3);
-  border-radius: var(--radius-full); border-color: var(--border-2);
+  border-radius: var(--radius-full); border-color: var(--border-ctl);
   white-space: normal; text-align: left; color: var(--ink-2);
 }
-.chat-suggest .btn:hover { color: var(--ink); border-color: var(--border-ctl); }
+.chat-suggest .btn:hover { color: var(--ink); border-color: var(--border-ctl-hover); }
 .typing { display: inline-flex; gap: var(--space-1); padding: var(--space-1) 0; }
 .typing i { width: 6px; height: 6px; border-radius: var(--radius-full); background: var(--ink-3); animation: blink 1s infinite; }
 .typing i:nth-child(2) { animation-delay: .18s; }

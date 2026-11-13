@@ -64,6 +64,7 @@ negadas geram toast e registro na auditoria.
 | `Enter` / `Espaço` | card do Kanban | abre o painel da tarefa |
 | `Alt+←` / `Alt+→` | card do Kanban | move a tarefa para a coluna vizinha |
 | `Ctrl+Enter` / `⌘Enter` | modal Nova tarefa, comentário | cria a tarefa / envia o comentário |
+| `n` | qualquer tela, fora de campos de texto | abre o modal Nova tarefa (se o perfil puder criar) |
 | `Esc` | menu, painel, modal | fecha só a camada do topo |
 
 ## Fluxos implementados (cenários A–G do briefing)
