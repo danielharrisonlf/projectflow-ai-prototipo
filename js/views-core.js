@@ -37,10 +37,15 @@
 
   var DEMO_PROFILES = ["u1", "u2", "u4", "u8", "u18"];
 
-  PF.renderApp = function () {
+  function currentRoute() {
     var parts = PF.parseHash();
     var key = parts[0] === "insights" && parts[1] ? "insights/" + parts[1] : parts[0];
-    var route = PF.routes[key] || PF.routes[parts[0]] || PF.routes.dashboard;
+    return { parts: parts, key: key, route: PF.routes[key] || PF.routes[parts[0]] || PF.routes.dashboard };
+  }
+
+  PF.renderApp = function () {
+    var cur = currentRoute();
+    var parts = cur.parts, key = cur.key, route = cur.route;
     var app = route.app || "workspace";
     if (PF.db.settings.activeApp !== app) { PF.db.settings.activeApp = app; PF.save(); }
 
@@ -51,7 +56,7 @@
     shell.appendChild(renderSidebar(app, key));
     var main = h("div", { class: "main" });
     main.appendChild(renderTopbar(route, parts));
-    var content = h("div", { class: "content" });
+    var content = h("main", { class: "content", id: "conteudo", tabindex: "-1" });
     var page = h("div", { class: "page" + (route.wide ? " wide" : "") });
     content.appendChild(page);
     main.appendChild(content);
@@ -63,7 +68,22 @@
     } else {
       route.render(page, parts.slice(1));
     }
+    // títulos de painel ficam um nível abaixo do h1 da página (h3 mantém o estilo atual)
+    page.querySelectorAll(".panel-head h3").forEach(function (t) { t.setAttribute("role", "heading"); t.setAttribute("aria-level", "2"); });
+    var h1 = page.querySelector("h1");
+    if (h1) h1.setAttribute("tabindex", "-1");
+    document.title = (h1 ? h1.textContent : route.title) + " · ProjectFlow AI";
     PF._shell = shell;
+  };
+
+  // depois de trocar de rota: foco no título da página (leitor de tela anuncia o novo contexto)
+  PF.focusPageTitle = function () {
+    var t = document.querySelector("#conteudo h1") || document.getElementById("conteudo");
+    if (t) t.focus({ preventScroll: true });
+  };
+  PF.announceRoute = function () {
+    var h1 = document.querySelector("#conteudo h1");
+    PF.announce("Página: " + (h1 ? h1.textContent : currentRoute().route.title));
   };
 
   function renderSidebar(app, activeKey) {
@@ -115,7 +135,7 @@
   }
 
   function renderTopbar(route, parts) {
-    var tb = h("div", { class: "topbar" });
+    var tb = h("header", { class: "topbar" });
     tb.appendChild(h("button", {
       class: "btn btn-ghost btn-icon tb-burger", "aria-label": "Abrir menu",
       onclick: function () { document.querySelector(".shell").classList.toggle("nav-open"); }
@@ -148,13 +168,25 @@
     return tb;
   }
 
+  // um único listener global fecha a lista de resultados (o render recria a topbar a cada refresh)
+  document.addEventListener("click", function (e) {
+    var w = document.querySelector(".tb-search");
+    if (w && !w.contains(e.target)) closeSearchResults(w);
+  });
+  function closeSearchResults(w) {
+    var r = w && w.querySelector(".results");
+    if (r) r.remove();
+    var inp = w && w.querySelector("input");
+    if (inp) inp.setAttribute("aria-expanded", "false");
+  }
+
   function renderSearch() {
-    var wrap = h("div", { class: "tb-search" });
-    var input = h("input", { class: "input", type: "search", placeholder: "Buscar tarefas e projetos…", "aria-label": "Buscar" });
+    var wrap = h("div", { class: "tb-search", role: "search" });
+    var input = h("input", { class: "input", type: "search", placeholder: "Buscar tarefas e projetos…", "aria-label": "Buscar tarefas e projetos", "aria-expanded": "false", "aria-controls": "busca-resultados", "data-fk": "busca-global" });
     wrap.appendChild(h("span", { class: "ic" }, icon("search", 14)));
     wrap.appendChild(input);
-    var results = null;
-    function close() { if (results) { results.remove(); results = null; } }
+    function close() { closeSearchResults(wrap); }
+    function items() { var r = wrap.querySelector(".results"); return r ? Array.prototype.slice.call(r.querySelectorAll(".menu-item")) : []; }
     input.addEventListener("input", function () {
       close();
       var q = input.value.trim().toLowerCase();
@@ -165,8 +197,8 @@
       var projs = PF.visibleProjects().filter(function (p) {
         return p.name.toLowerCase().indexOf(q) >= 0 || p.key.toLowerCase().indexOf(q) >= 0;
       }).slice(0, 3);
-      results = h("div", { class: "results" });
-      if (!tasks.length && !projs.length) results.appendChild(h("div", { class: "menu-head" }, "Nenhum resultado"));
+      var results = h("div", { class: "results", id: "busca-resultados", role: "group", "aria-label": "Resultados da busca" });
+      if (!tasks.length && !projs.length) results.appendChild(h("div", { class: "menu-head", role: "status" }, "Nenhum resultado"));
       projs.forEach(function (p) {
         results.appendChild(h("button", {
           class: "menu-item",
@@ -179,16 +211,24 @@
           onclick: function () { close(); input.value = ""; PF.ui.openTask(t.id); }
         }, PF.typeIcon(t.type), h("span", { class: "grow" }, t.title, h("span", { class: "mi-sub" }, t.ref + " · " + PF.STATUS_META[t.status].label))));
       });
+      results.addEventListener("keydown", function (e) {
+        var list = items(), i = list.indexOf(document.activeElement);
+        if (e.key === "ArrowDown") { e.preventDefault(); if (list[i + 1]) list[i + 1].focus(); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); if (i > 0) list[i - 1].focus(); else input.focus(); }
+        else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); input.focus(); }
+      });
       wrap.appendChild(results);
+      input.setAttribute("aria-expanded", "true");
+      PF.announce(tasks.length + projs.length ? (tasks.length + projs.length) + " resultados. Use as setas para navegar." : "Nenhum resultado");
     });
     input.addEventListener("keydown", function (e) {
-      if (e.key === "Escape") { close(); input.blur(); }
-      if (e.key === "Enter" && results) {
-        var first = results.querySelector(".menu-item");
+      if (e.key === "Escape") { e.stopPropagation(); close(); input.blur(); }
+      if (e.key === "ArrowDown" && items().length) { e.preventDefault(); items()[0].focus(); }
+      if (e.key === "Enter") {
+        var first = items()[0];
         if (first) first.click();
       }
     });
-    document.addEventListener("click", function (e) { if (!wrap.contains(e.target)) close(); });
     return wrap;
   }
 

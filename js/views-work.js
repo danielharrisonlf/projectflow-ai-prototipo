@@ -311,11 +311,38 @@
 
   PF.ui.renderTaskTable = function (container, opts) {
     opts = opts || {};
-    var holder = h("div");
-    container.appendChild(holder);
     var st = opts.state || tblState;
 
+    // barra de filtros criada uma única vez: digitar na busca redesenha só a tabela
+    var fbar = h("div", { class: "fbar" });
+    var qIn = h("input", { class: "input search", type: "search", placeholder: "Buscar título ou identificador…", value: st.q, "aria-label": "Buscar tarefas", "data-fk": "tbl-busca" });
+    qIn.addEventListener("input", function () { st.q = qIn.value; st.page = 0; draw(); });
+    fbar.appendChild(qIn);
+    var selStatus = PF.select([{ value: "", label: "Todos os status" }].concat(PF.STATUSES.map(function (s) { return { value: s, label: PF.STATUS_META[s].label }; })), st.status, function (v) { st.status = v; st.page = 0; draw(); }, { "aria-label": "Status" });
+    var selPrio = PF.select([{ value: "", label: "Todas as prioridades" }].concat(PF.PRIORITIES.map(function (p) { return { value: p, label: PF.PRIO_META[p].label }; })), st.priority, function (v) { st.priority = v; st.page = 0; draw(); }, { "aria-label": "Prioridade" });
+    fbar.append(selStatus, selPrio);
+    var selWho = null;
+    if (!opts.assigneeId) {
+      selWho = PF.select([{ value: "", label: "Todos os responsáveis" }].concat(PF.db.users.filter(function (u) { return !u.invited; }).map(function (u) { return { value: u.id, label: u.name }; })), st.assignee, function (v) { st.assignee = v; st.page = 0; draw(); }, { "aria-label": "Responsável" });
+      fbar.appendChild(selWho);
+    }
+    var clearBtn = h("button", { class: "btn btn-ghost btn-sm", onclick: function () {
+      st.q = st.status = st.priority = st.assignee = ""; st.page = 0;
+      qIn.value = ""; selStatus.value = ""; selPrio.value = ""; if (selWho) selWho.value = "";
+      draw(); qIn.focus();
+    } }, icon("x", 12), "Limpar");
+    fbar.appendChild(clearBtn);
+    container.appendChild(fbar);
+    var holder = h("div");
+    container.appendChild(holder);
+
     function draw() {
+      var fk = PF.captureFocus();
+      drawTable();
+      if (fk && (document.activeElement === document.body || !document.activeElement)) PF.restoreFocus(fk);
+    }
+    function drawTable() {
+      clearBtn.style.display = (st.q || st.status || st.priority || st.assignee) ? "" : "none";
       holder.replaceChildren();
       var tasks = PF.visibleTasks().filter(function (t) {
         if (t.parentId) return false;
@@ -329,16 +356,6 @@
         if (q && t.title.toLowerCase().indexOf(q) < 0 && t.ref.toLowerCase().indexOf(q) < 0) return false;
         return true;
       });
-
-      var fbar = h("div", { class: "fbar" });
-      var qIn = h("input", { class: "input search", type: "search", placeholder: "Buscar título ou identificador…", value: st.q, "aria-label": "Buscar tarefas" });
-      qIn.addEventListener("input", function () { st.q = qIn.value; st.page = 0; draw(); });
-      fbar.appendChild(qIn);
-      fbar.appendChild(PF.select([{ value: "", label: "Todos os status" }].concat(PF.STATUSES.map(function (s) { return { value: s, label: PF.STATUS_META[s].label }; })), st.status, function (v) { st.status = v; st.page = 0; draw(); }, { "aria-label": "Status" }));
-      fbar.appendChild(PF.select([{ value: "", label: "Todas as prioridades" }].concat(PF.PRIORITIES.map(function (p) { return { value: p, label: PF.PRIO_META[p].label }; })), st.priority, function (v) { st.priority = v; st.page = 0; draw(); }, { "aria-label": "Prioridade" }));
-      if (!opts.assigneeId) fbar.appendChild(PF.select([{ value: "", label: "Todos os responsáveis" }].concat(PF.db.users.filter(function (u) { return !u.invited; }).map(function (u) { return { value: u.id, label: u.name }; })), st.assignee, function (v) { st.assignee = v; st.page = 0; draw(); }, { "aria-label": "Responsável" }));
-      if (st.q || st.status || st.priority || st.assignee) fbar.appendChild(h("button", { class: "btn btn-ghost btn-sm", onclick: function () { st.q = st.status = st.priority = st.assignee = ""; st.page = 0; draw(); } }, icon("x", 12), "Limpar"));
-      holder.appendChild(fbar);
 
       // ordenação
       var sorters = {
@@ -459,7 +476,7 @@
 
       var fbar = h("div", { class: "fbar" });
       fbar.appendChild(pick.el);
-      var qIn = h("input", { class: "input search", type: "search", placeholder: "Buscar título ou ref…", value: boardF.q, "aria-label": "Buscar no quadro" });
+      var qIn = h("input", { class: "input search", type: "search", placeholder: "Buscar título ou ref…", value: boardF.q, "aria-label": "Buscar no quadro", "data-fk": "board-busca" });
       var deb = null;
       qIn.addEventListener("input", function () { clearTimeout(deb); deb = setTimeout(function () { boardF.q = qIn.value; PF.refresh(); }, 180); });
       fbar.appendChild(qIn);

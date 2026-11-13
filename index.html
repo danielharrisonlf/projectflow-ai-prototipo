@@ -12,9 +12,12 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<div id="app" aria-live="polite"></div>
+<a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
+<div id="app"></div>
 <div id="overlays"></div>
-<div id="toasts" role="status" aria-live="polite"></div>
+<div id="toasts"></div>
+<div id="live-polite" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="live-assertive" class="sr-only" role="alert" aria-live="assertive" aria-atomic="true"></div>
 <script src="js/data.js"></script>
 <script src="js/core.js"></script>
 <script src="js/views-core.js"></script>

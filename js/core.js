@@ -800,13 +800,95 @@
     var parts = PF.parseHash();
     return PF.routes[parts[0]] || null;
   };
+  /* ---------- foco estável entre re-renderizações ----------
+     O render recria o DOM; para teclado e leitor de tela não voltarem
+     ao início da página, guardamos uma chave do elemento focado
+     (data-fk, aria-label, caminho na árvore) e a reaplicamos depois. */
+  function cssEsc(s) { return window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/["\\]/g, "\\$&"); }
+  function nodePath(el, root) {
+    var path = [];
+    for (var n = el; n && n !== root; n = n.parentElement) {
+      if (!n.parentElement) return null;
+      path.unshift(Array.prototype.indexOf.call(n.parentElement.children, n));
+    }
+    return path;
+  }
+  function textKey(el) { return (el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80); }
+  PF.captureFocus = function () {
+    var el = document.activeElement;
+    if (!el || el === document.body || el === document.documentElement) return null;
+    var root = el.closest("#app, #overlays");
+    if (!root) return null;
+    var k = { root: root.id, tag: el.tagName, fk: el.getAttribute("data-fk"), label: el.getAttribute("aria-label"), text: textKey(el), path: nodePath(el, root) };
+    try { if (typeof el.selectionStart === "number") { k.ss = el.selectionStart; k.se = el.selectionEnd; k.sd = el.selectionDirection; } } catch (e) { /* input sem seleção (date, checkbox) */ }
+    return k;
+  };
+  PF.restoreFocus = function (k) {
+    if (!k) return false;
+    var root = document.getElementById(k.root);
+    if (!root) return false;
+    var el = null;
+    function uniq(list) { return list.length === 1 ? list[0] : null; }
+    if (k.fk) el = root.querySelector('[data-fk="' + cssEsc(k.fk) + '"]');
+    if (!el && k.label) el = uniq(root.querySelectorAll(k.tag + '[aria-label="' + cssEsc(k.label) + '"]'));
+    if (!el && k.path) {
+      var n = root;
+      for (var i = 0; n && i < k.path.length; i++) n = n.children[k.path[i]];
+      if (n && n.tagName === k.tag && (/^(INPUT|SELECT|TEXTAREA)$/.test(k.tag) || textKey(n) === k.text)) el = n;
+    }
+    if (!el && k.text && /^(BUTTON|A)$/.test(k.tag)) {
+      el = uniq(Array.prototype.filter.call(root.querySelectorAll(k.tag), function (x) { return textKey(x) === k.text; }));
+    }
+    if (!el || el.disabled || !el.isConnected) return false;
+    el.focus({ preventScroll: true });
+    if (k.ss != null) { try { el.setSelectionRange(k.ss, k.se, k.sd || "none"); } catch (e) { /* ignorado */ } }
+    return document.activeElement === el;
+  };
+  // quando o elemento focado deixou de existir: foco vai para o contêiner estável mais próximo
+  PF.focusFallback = function (rootId) {
+    var target = null;
+    if (rootId === "overlays") { var ds = document.querySelectorAll("#overlays [role=dialog]"); target = ds[ds.length - 1] || null; }
+    if (!target) target = document.getElementById("conteudo");
+    if (target) target.focus({ preventScroll: true });
+  };
+
+  var refreshDeferred = false;
   PF.refresh = function () {
+    if (PF._batchDepth) { PF._batchDirty = true; return; }
+    // mudança disparada ao sair de um campo de texto: espera o foco chegar ao destino
+    var ev = window.event;
+    if (ev && ev.type === "change" && ev.target && /^(TEXTAREA|INPUT)$/.test(ev.target.tagName) && !/^(checkbox|radio|date|range|color|file)$/.test(ev.target.type || "")) {
+      if (!refreshDeferred) { refreshDeferred = true; setTimeout(function () { refreshDeferred = false; PF.refresh(); }, 0); }
+      return;
+    }
+    var fk = PF.captureFocus();
     var content = document.querySelector(".content");
     var st = content ? content.scrollTop : 0;
+    var dBody = document.querySelector("#overlays .drawer-body");
+    var dst = dBody ? dBody.scrollTop : 0;
     PF.renderApp();
     var c2 = document.querySelector(".content");
     if (c2) c2.scrollTop = st;
     if (PF._drawerRefresh) PF._drawerRefresh();
+    var d2 = document.querySelector("#overlays .drawer-body");
+    if (d2) d2.scrollTop = dst;
+    if (fk && !PF.restoreFocus(fk)) PF.focusFallback(fk.root);
+  };
+  // agrupa várias mutações em um único re-render
+  PF.batch = function (fn) {
+    PF._batchDepth = (PF._batchDepth || 0) + 1;
+    try { return fn(); } finally {
+      PF._batchDepth--;
+      if (!PF._batchDepth && PF._batchDirty) { PF._batchDirty = false; PF.refresh(); }
+    }
+  };
+
+  /* ---------- região viva (anúncios para leitor de tela) ---------- */
+  PF.announce = function (msg, assertive) {
+    var el = document.getElementById(assertive ? "live-assertive" : "live-polite");
+    if (!el || !msg) return;
+    el.textContent = "";
+    setTimeout(function () { el.textContent = msg; }, 30);
   };
 
   /* ---------- overlays ---------- */
@@ -924,6 +1006,7 @@
       h("div", {}, h("b", {}, title), msg ? h("span", {}, msg) : null)
     );
     document.getElementById("toasts").appendChild(t);
+    PF.announce(title + (msg ? ". " + msg : ""), kind === "err");
     setTimeout(function () {
       t.classList.add("leaving");
       setTimeout(function () { t.remove(); }, 220);
