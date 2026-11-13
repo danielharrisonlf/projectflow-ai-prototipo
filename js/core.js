@@ -1586,9 +1586,9 @@
     } catch (e) { fail(); }
   };
 
-  // opts.compact: variante para painel (mesma estrutura, classe extra)
+  // opts.compact: variante compacta (.empty.inline do design system; dentro de .panel já é automática)
   PF.emptyState = function (iconName, title, msg, action, opts) {
-    return h("div", { class: "empty" + (opts && opts.compact ? " compact" : "") },
+    return h("div", { class: "empty" + (opts && opts.compact ? " inline" : "") },
       h("div", { class: "e-ic" }, icon(iconName, 20)),
       h("b", {}, title),
       h("p", {}, msg || ""),
