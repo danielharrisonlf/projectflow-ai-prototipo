@@ -65,6 +65,7 @@ Contraste medido (WCAG 2.x). "Pior caso" = menor razão entre `--bg`, `--surface
 | Token | Claro | Escuro | Uso |
 |---|---|---|---|
 | `--bg` | `#F2F4F7` | `#0E1116` | fundo da aplicação |
+| `--chrome` | `#F7F8FA` | `#0B0E12` | sidebar: moldura que recua atrás do conteúdo (`--ink-3` 5.23 / 6.23) |
 | `--surface` | `#FFFFFF` | `#161A21` | painel, sidebar, topbar, card |
 | `--surface-2` | `#EBEEF2` | `#10141A` | rebaixado: coluna do Kanban, código, trilho de controle segmentado |
 | `--surface-hover` / `--surface-press` | `#F2F4F7` / `#E6E9EE` | `#1C212A` / `#232934` | hover/pressão opacos (botão secundário, linha de tabela) |
@@ -128,7 +129,15 @@ do Insights e a cor de "em revisão"/épico. Vermelho só para erro, atraso e a�
 escuro `#8DA9F2 #B19DEB #6CC1D9 #6FCB97 #E2AE66 #EE8E86 #E68DBB #9CB2BD #C9A979 #86C0B6`.
 Texto sobre categórica: `--on-cat` (`#FFFFFF` / `#0E1116`, ≥ 5.3:1 em todas).
 
+Os dados continuam guardando o hex claro da paleta (`user.color`, `project.color`); a interface
+converte com `PF.catVar(hex)` → `var(--cat-N)` (hex fora da paleta cai num índice estável). Avatar
+(`--av`), ponto de projeto (`PF.projectDot`, `--dot`) e etiqueta (`--lc`, mapa fixo por etiqueta)
+usam o token direto, já tematizado: nada de `color-mix` sobre hex no escuro.
+
 ### 3.6 Outros
+
+Gráficos: `--chart-grid` (`#E6E9EE` / `#232831`, grade recessiva) e `--chart-area` (acento a 10% / 14%,
+preenchimento sob a linha e na sparkline).
 
 `--tooltip-bg`/`--tooltip-ink` (invertido: 16.2 / 15.4), `--selection`, `--skeleton`, `--focus-color`
 (= `--accent`: 5.09 sobre `--bg` claro, 7.42 sobre `--bg` escuro, 6.12 sobre `--overlay` escuro).
@@ -142,9 +151,10 @@ nomes de evento e ferramenta. Números que mudam usam `font-variant-numeric: tab
 
 | Token | Tamanho / linha | Papel |
 |---|---|---|
-| `--text-24` / `--lh-24` | 24 / 32 | h1 de página, valor de KPI |
-| `--text-19` / `--lh-19` | 19 / 28 | h1 e KPI em telas ≤ 860px |
-| `--text-16` / `--lh-16` | 16 / 24 | título de modal e drawer |
+| `--text-28` / `--lh-28` | 28 / 32 | valor de KPI (número tabular) |
+| `--text-24` / `--lh-24` | 24 / 32 | h1 de página, número de destaque de gráfico |
+| `--text-19` / `--lh-19` | 19 / 28 | h1 e KPI em telas ≤ 560–860px, título da tarefa no inspector |
+| `--text-16` / `--lh-16` | 16 / 24 | título de modal |
 | `--text-14` / `--lh-14` | 14 / 20 | título de painel, título de estado vazio |
 | `--text-13` / `--lh-13` | 13 / 20 | corpo, células, botões, menu |
 | `--text-12` / `--lh-12` | 12 / 16 | metadados, rótulos, chips, cabeçalho de tabela, toast |
@@ -190,7 +200,7 @@ escuro. Controles não têm sombra: o segmento ativo usa borda `--border-ctl`. O
 é uma hairline de 1px (`box-shadow` sem blur), não elevação.
 
 **Camadas (`--z-*`).** `base` 0 · `raised` 1 · `sticky` 10 · `backdrop` 90 · `drawer` 95 ·
-`modal` 95 · `nav` 110 · `dropdown` 120 · `toast` 200 · `tooltip` 300.
+`modal` 95 · `nav-backdrop` 105 (`.backdrop.nav-backdrop`) · `nav` 110 · `dropdown` 120 · `toast` 200 · `tooltip` 300.
 Menus ficam acima de drawer e modal porque abrem de dentro deles. O JS empilha diálogos a partir de
 95, somando 2 por camada (confirmação sobre drawer = 97), põe o véu da nav móvel em 105 e o tooltip
 de gráfico em 300: alterar esses tokens exige alterar o JS junto.
@@ -268,6 +278,25 @@ prioridade), `.label-chip` (etiqueta: retângulo de raio 4 com quadrado de cor `
 `.avatar-stack` sobrepõe 4px com anel `--surface`. `.who-cell` = avatar + nome com reticências.
 Equipes não usam avatar: usam chip com o nome.
 
+### Filtro rotulado — `.fsel`
+`PF.filterSelect(rótulo, opções, valor, onChange, attrs, { def })` →
+`<label class="fsel [is-set]"><span class="fsel-l">Período</span><select class="select" aria-label="Período"></label>`.
+O rótulo fica sempre visível (o valor sozinho, "Todos", não explica o filtro). O contorno `--border-ctl`
+é do contêiner; o select interno não tem borda e o anel de foco vai para o contêiner (`:focus-within`).
+`.is-set` (valor ≠ `def`, padrão `""`) pinta o filtro ativo em `--selected` com rótulo `--accent-fg`.
+Usado no Início, Projetos, tabelas de tarefas, Cronograma, Insights e Auditoria.
+
+### Barra de visão — `.viewbar` (Kanban)
+`busca · button "Filtro" (+ .btn-count) · .fchip… · "Limpar tudo" · espaçador · "Ordenar: X"`.
+"Filtro" abre um menu de categorias e, em seguida, o menu de valores (`menuitemradio`, com avatar,
+glifo de prioridade etc.). Cada filtro ativo vira `button.fchip` ("Prioridade **Alta** ×"): o botão
+inteiro remove o filtro (`aria-label="Remover filtro Prioridade: Alta"`) e devolve o foco a "Filtro".
+Com um único filtro de muitos valores (projeto), use `.project-switch` ao lado do título.
+
+### Seletor de projeto — `.project-switch`
+Ponto de cor do projeto + select sem borda dentro de um contêiner de controle. Fica **ao lado do
+h1** (`PF.ui.pageHead(título, sub, ações, aside)` → `.page-title-row`) em Kanban, Backlog e Sprints.
+
 ### Painel — `.panel`
 `.panel > .panel-head (h2|h3 + .spacer + ações) + .panel-body[.flush]`. Cabeçalho com mínimo de
 48px, quebra linha (`flex-wrap`) quando as ações não cabem, título 14/600. Corpo com 16 de padding;
@@ -275,9 +304,13 @@ Equipes não usam avatar: usam chip com o nome.
 colunas `minmax(0, 1fr)`; em ≤ 1100px viram uma coluna.
 
 ### KPI — `.stat-strip > .stat`
-`.stat > .lbl (12/500 --ink-2) + .val (24/600 tabular) + .ctx (12 --ink-2; .bad/.good só quando o
-número descreve estado)`. Hairlines de 1px por célula, sem buracos com qualquer número de colunas.
-KPI navegável: `a.stat` (ou `.stat.clickable` até o markup mudar).
+`.stat > .lbl (ícone 14 --ink-3 + rótulo 12/500 --ink-2) + .stat-row (.val 28/600 tabular + .spark?)
++ .ctx (12 --ink-2; .bad/.good só quando o número descreve estado)`. `.val.text` (16) para valores
+textuais (endpoint, "Online"). Hairlines de 1px por célula, sem buracos com qualquer número de colunas.
+KPI navegável: `a.stat[href]` com seta `.go` que aparece no hover/foco.
+**Sparkline** (`PF.sparkline(valores)` → `svg.spark`, 88×28): só com série real (conclusões por fatia
+do período), `aria-hidden` porque o número e o contexto já dizem o valor. **Delta** em `.ctx > .delta`
+(seta + valor com sinal, cor neutra: é comparação, não estado).
 
 ### Tabela — `table.tbl` dentro de `.tbl-wrap`
 - Cabeçalho 36px, 12/500 `--ink-2`, caixa normal, `position: sticky` (≥ 1280px fica preso ao topo
@@ -293,11 +326,26 @@ KPI navegável: `a.stat` (ou `.stat.clickable` até o markup mudar).
 - `.pager` no rodapé do painel.
 
 ### Lista — `.list > .list-item` (ListRow)
-`.list-item (a|button) > .li-lead? + .li-main (.li-title + .li-meta) + .li-trail` — 40px
-(`.compact` 32px), separador controlado pelo contêiner, hover, foco interno,
-`[aria-current=true]`/`.is-selected`. Substitui `taskRow`, favoritos, subtarefas e `.hist-item`.
-`.hist-item` (linha de histórico/atividade/membro: 40px, divisor sólido, `time` à direita) segue
-estilizado para o markup atual.
+`.list-item (a|button) > .li-lead? + .li-main (.li-title 13/500 + .li-meta 12 --ink-3) + .li-trail` —
+40px (`.compact` 32px), separador controlado pelo contêiner (a última linha nunca duplica a borda do
+painel), hover, foco interno, `[aria-current=true]`/`.is-selected`. Linha de tarefa (`PF.ui.taskRow`):
+status + tipo · título e "REF · projeto" · chip Atrasada, prazo (`.due[.late|.soon]` com ícone),
+glifo de prioridade, avatar. Usada no Início, Sprints, membros, favoritos e subtarefas.
+
+### Linha do tempo — `.timeline > .hist-item`
+Trilho vertical de 1px (`--border-2`) passando pelo centro do nó de 20px (avatar ou `.tl-node
+[.accent|.violet|.info|.warn|.danger]` com ícone). Texto em `.tl-txt` (`b` = quem, resto `--ink-2`),
+`time` à direita. Atividades do Início/Insights/projeto (`PF.ui.activityFeed`), marcos e histórico
+da tarefa (o nó tem a cor da origem, e o `.src-tag` diz a origem em texto). No drawer o nó é
+mascarado com `--overlay` (`--tl-bg`).
+
+### Bloco de progresso — `.prog-block`
+`.pb-head (ponto/ícone + nome + .pb-sub + .pb-num) + .progress + .pb-foot`. Sprints ativas e épicos;
+separados por divisor dentro de `.prog-list`.
+
+### Linha de propriedades — `.meta-row > .meta-item`
+Cabeçalho do detalhe de projeto: rótulo 12 `--ink-3` sobre valor (chip, glifo, avatar, período,
+progresso). Divisores de 1px entre itens; quebra em 3 ou 2 por linha em telas estreitas.
 
 ### Abas — `.tabs > .tab`
 36px, 13/500 `--ink-2`; ativa (`.active`, `[aria-selected=true]` ou `[aria-current=page]`) em
@@ -314,21 +362,32 @@ recomendado é `<nav class="tabs" aria-label="…"><a class="tab" aria-current="
 ### Drawer — `.drawer`
 `aside.drawer[role=dialog] > .drawer-head (48px) + .drawer-body (16) + .drawer-foot?`, largura
 `min(560px, 100vw)`, `--overlay`, borda esquerda, `--shadow-overlay`, véu `.backdrop`.
-**Inspector de tarefa:** o título (primeira `textarea` do corpo) não tem borda até o hover e cresce
-com o conteúdo; `.task-props` é uma grade de 120px (rótulo 13 `--ink-2`) + valor, e selects/inputs
-dentro dela viram "botões de propriedade" (sem borda, chevron só no hover/foco, desabilitado
-vira texto). Seções (`.section-h`, 13/600) são separadas por divisor no topo. Campos desabilitados
-no drawer (somente leitura) aparecem como texto. Componente alvo: `.prop-btn` (ícone + valor).
+**Inspector de tarefa:** cabeçalho com tipo + ref mono + projeto (`.drawer-crumb`) e ações (copiar
+referência, menu, fechar). Título `textarea.task-title` 19/600 sem borda até o hover, cresce com o
+conteúdo. Faixa `.banner.warn` quando há bloqueio ativo. `.task-props` é uma grade de 112px (ícone +
+rótulo 13 `--ink-2`) + valor:
+- `PF.propButton({ label, value, options:[{value,label,node}], onChange, fk, empty })` →
+  `button.prop-btn[aria-haspopup=menu]` com ícone/avatar/glifo + valor + chevron (só no hover/foco/aberto);
+  abre um menu de escolha única (`menuitemradio`, com o mesmo ícone em cada opção). Sem valor:
+  `.is-empty` ("Sem responsável" em `--ink-3`). `data-fk` mantém o foco no botão após o re-render.
+- Somente leitura: `PF.propValue(nó, texto)` → `.prop-val`, mesmo desenho sem interação.
+- Etiquetas e "Bloqueada por" são linhas de propriedade (`.pv-row`: chips + `prop-btn` Editar/Adicionar).
+- Prazo segue como `input type=date` sem borda (o seletor nativo; ver pendências).
+Seções (`h2.section-h`, 13/600, divisor no topo, contador `.count` e resumo `.sh-aside`): Descrição,
+Critérios de aceite (com barra de progresso), Subtarefas (`.list.sub-list`), Comentários (balão
+`--surface-2`, `Ctrl+Enter` envia) e Histórico (linha do tempo). O card/linha da tarefa aberta recebe
+`aria-current=true` / `.is-selected` enquanto o painel estiver aberto.
 
 ### Modal — `.modal > .modal-card[.wide]`
 560px (760 em `.wide`), raio 10, `.modal-head` (título 16/600 + fechar), `.modal-body` (24 lateral,
 rola), `.modal-foot` (ações à direita: secundária, depois primária). Entrada `dialog-in` (escala .98).
 
 ### Toast — `#toasts > .toast.[ok|warn|err|info]`
-Canto inferior direito, até 360px, `--overlay` + `--shadow-popover`, ícone colorido por tipo (cor
-nunca sozinha: o título descreve), borda `--danger-border`/`--warn-border` em erro e atenção.
-`b` título 13/600, `span` mensagem 12 `--ink-2`. Slots previstos: `.t-actions` (ex.: "Desfazer")
-e `.t-close` (botão ghost sm). Saída `.leaving` em 180ms.
+Canto inferior direito, até 360px, `--overlay` + `--shadow-popover`, ícone por tipo num quadrado de
+24px tingido (`-bg` do estado; cor nunca sozinha: o título descreve), borda `--danger-border`/`--warn-border`
+em erro e atenção. `b` título 13/600 com contador `.t-count` ("(7×)", 12 regular tabular), `span`
+mensagem 12 `--ink-2`, `.toast-close` (ghost sm) alinhado ao topo à direita. Slot `.t-actions`
+previsto. Saída `.leaving` em 180ms.
 
 ### Tooltip
 `[data-tip]` mostra o texto no hover **e** no `:focus-visible`, após 400ms, invertido
@@ -355,12 +414,16 @@ opacidade (sem gradiente). Usar com `aria-busy="true"` no contêiner.
 `role="progressbar" aria-valuenow aria-valuemin="0" aria-valuemax="100" aria-label="Progresso de …"`.
 
 ### Shell
-- `.shell` (grid 240px + conteúdo, 100dvh) › `.sidebar` (`.sb-brand` 48px, `.app-switch`,
-  `.sb-nav > .sb-section > .sb-section-title + .sb-item`, `.sb-footer`) e `.main` (`header.topbar` 48px,
-  `main.content#conteudo` com rolagem, `.page[.wide]`).
-- `.sb-item`: 32px, ativo por `.active` ou `[aria-current=page]` (`--selected`, ícone `--accent-fg`;
-  violeta no Insights). O item do rodapé ("Restaurar demonstração") fica `--ink-3` e acende em
-  `--danger` no hover, sinalizando que apaga dados.
+- `.shell` (grid 240px + conteúdo, 100dvh) › `.sidebar` em `--chrome` (`.sb-brand` 48px com marca
+  SVG e "organização · app", `.app-switch`, `.sb-nav > .sb-section > .sb-section-title + a.sb-item`,
+  `.sb-footer`) e `.main` (`header.topbar` 48px, `main.content#conteudo` com rolagem, `.page[.wide]`).
+- `a.sb-item[href]`: 32px, ícone `.ico` `--ink-3`; ativo por `[aria-current=page]` (ou `.active`) vira
+  uma "aba" em `--surface` com hairline `--border` e ícone `--accent-fg` (violeta no Insights).
+  Contador `.cnt` em pílula. O item do rodapé ("Restaurar dados da demonstração", só Administrador)
+  fica `--ink-3` e acende em `--danger` no hover, sinalizando que apaga dados.
+- Topbar: breadcrumb `nav.crumbs` (ícone do app + separador chevron, atual com `aria-current=page`);
+  busca de 320px com atalho visível `kbd Ctrl K`/`⌘ K` (some no foco e em ≤ 1100px). `Ctrl/⌘+K`
+  foca a busca de qualquer tela (exceto com diálogo aberto).
 - `.page-head`: h1 24/600 + `.sub` (máx. 72ch) + `.page-actions` à direita (selects em largura
   automática).
 - `.skip-link` aparece no primeiro Tab. `.sr-only` para texto só de leitor de tela.
@@ -380,8 +443,10 @@ ligar o erro por `aria-describedby` e focar o primeiro inválido. Ações no rod
 coluna de ação com largura reservada; ordenação por `aria-sort`; sem zebra (divisor basta).
 Em ≤ 640px, preferir lista (`.list-item`) a rolar horizontalmente.
 
-**Filtros.** `.fbar` com controles de 32px e gap 8; busca primeiro; "Limpar" (ghost sm) só aparece
-com filtro ativo. Com muitos filtros (Kanban), o destino é chip de filtro + popover (ver pendências).
+**Filtros.** `.fbar` com controles de 32px e gap 8; busca primeiro; filtros como `.fsel` (rótulo
+visível + valor, ativo em `--selected`); "Limpar" (ghost sm) só aparece com filtro ativo; contagem de
+resultados à direita quando ajuda ("11 projetos"). Com muitos filtros (Kanban), `.viewbar`: botão
+Filtro + chips removíveis + Ordenar.
 
 **Estados vazios.** Três casos distintos: nada criado ainda (CTA de criar), filtro sem resultado
 (contagem oculta + limpar), sem permissão (explica o perfil e oferece voltar).
@@ -390,18 +455,26 @@ com filtro ativo. Com muitos filtros (Kanban), o destino é chip de filtro + pop
 Condição contínua → `.banner`. Carregando → `aria-busy` + skeleton (área) ou `.is-loading` (botão).
 Destrutivo → `PF.confirm` com `btn-danger` e consequência escrita.
 
-**Kanban.** Colunas flexíveis de 220–340px: as cinco cabem em 1440; abaixo disso a última aparece
-cortada, sinal de que há mais à direita, e o quadro rola dentro de si (a página não rola). O quadro
-ocupa a altura útil (`.page:has(> .board)` vira coluna flex), então a barra de rolagem fica visível.
-Card: ref mono 12 `--ink-3`, título 13/500, rodapé 12; selecionado (`[aria-current=true]`) com
-contorno de 2px `--accent`.
+**Kanban.** Colunas flexíveis de 232–340px em `--surface-2` com borda: as cinco cabem em 1440 (a
+última pode aparecer cortada, sinal de que há mais à direita) e o quadro rola dentro de si. O
+cabeçalho da coluna (ícone de status, nome 13/600, `.count`, chip de atrasadas com ícone, "+") fica
+fora da área que rola. O quadro ocupa a altura útil (`.page:has(> .board)` vira coluna flex).
+Card: linha 1 = tipo + ref mono 12 `--ink-3` + avatar; título 13/500 (até onde precisar);
+etiquetas; rodapé = glifo de prioridade, Bloqueada, prazo (`.due`, "2d de atraso"/"Hoje"/"Amanhã"/
+data), subtarefas. Aberto no inspector: `[aria-current=true]` com contorno de 2px `--accent` e fundo
+`--selected`. Coluna vazia: `.col-empty` tracejada ("Sem tarefas" + dica de arrastar só para quem move).
 
 **Cronograma.** Linhas de 40px, rótulo fixo à esquerda, meses em minúsculas, linha "hoje" (2px
 `--danger`) atrás das barras, marcos em losango com anel `--surface`.
 
-**Gráficos.** Rótulos em `--ink-2`, eixos em `--border`, série em `--accent`; status com as cores de
-status. Texto de SVG em unidades do `viewBox` (15) para render ≥ 12px a 1440; o primeiro rótulo do
-eixo x alinha à esquerda e o último à direita.
+**Gráficos.** O SVG de linha é desenhado na largura real do contêiner (`ResizeObserver`; 1 unidade =
+1px), então os rótulos ficam em 12px em qualquer largura. Eixo y com teto "redondo" em 4 faixas
+(`--chart-grid`), rótulos `--ink-3`, linha `--accent` 2px com área `--chart-area`, último ponto cheio
+com o valor escrito, cruz tracejada e tooltip (`.tooltip[role=tooltip]`) no hover de cada coluna.
+Rótulos do eixo x: tantos quantos couberem (≥ 64px), o 1º alinhado à esquerda e o último à direita.
+Cabeçalho do gráfico `.chart-head` (total grande + média). Barras: `.bar-list > .bar-row` (trilho 8px
+pílula, valor 13/600 tabular à direita, hover de linha), cores de status nas distribuições por status e
+`--warn` em equipes abaixo de 70% no prazo — sempre com rótulo e valor em texto.
 
 ---
 
@@ -416,8 +489,15 @@ eixo x alinha à esquerda e o último à direita.
       `aria-checked`, `aria-invalid`, `aria-busy`, `aria-sort`, `aria-disabled`.
 - [x] `prefers-reduced-motion` respeitado; troca de tema sem transição.
 - [x] Sem rolagem horizontal da página em 390px; alvos de toque ≥ 24px.
-- [ ] Tooltips com equivalente acessível (`aria-label`) — depende do markup.
-- [ ] Linhas de tabela com link real (`.row-link`) — depende do markup.
+- [x] Tooltips com equivalente acessível (`aria-label` ou texto ao lado).
+- [x] Linhas de tabela com link/botão real (`.row-link`; `button.row-link` tem reset no CSS).
+- [x] Filtros com rótulo visível (`.fsel`), não só `aria-label`.
+
+### Pendências conhecidas
+- Prazo no inspector usa o `input type=date` nativo (formato do sistema, "14/11/2026"); um DatePicker
+  com data curta e atalhos ("Hoje", "+1 semana") é componente novo, fora deste protótipo.
+- Toast com "Desfazer" exige reverter auditoria, eventos e webhooks já emitidos (ver status UI-19).
+- Skeleton está estilizado, mas as operações são síncronas e não há carregamento real para exibi-lo.
 
 ---
 
