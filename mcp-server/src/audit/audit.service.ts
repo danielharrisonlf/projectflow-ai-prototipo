@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { can, canSeeAudit, roleName } from '../domain/access.js';
+import { can, canSeeAudit, roleName, scopeUsers } from '../domain/access.js';
 import type { Actor } from '../domain/actor.js';
-import { NotFoundError, PermissionDeniedError, ValidationError } from '../domain/errors.js';
+import { NotFoundError, PermissionDeniedError } from '../domain/errors.js';
 import { uid } from '../domain/ids.js';
 import type { AuditEntry, Db } from '../domain/model.js';
-import { matchUser, rawProject } from '../domain/lookup.js';
+import { findProject, matchUser } from '../domain/lookup.js';
 import { StateStore } from '../state/state.store.js';
 
 export interface AuditRecord {
@@ -105,10 +105,11 @@ export class AuditService {
   async search(actor: Actor, filters: AuditSearchFilters) {
     if (!can(actor.user, 'audit.view')) throw await this.deny(actor, 'consultar a auditoria');
     return this.store.read((db) => {
-      const user = filters.user ? matchUser(db.users, filters.user) : undefined;
-      if (filters.user && !user) throw new ValidationError(`Usuário "${filters.user}" não encontrado.`);
-      const project = filters.project ? rawProject(db, filters.project) : undefined;
-      if (filters.project && !project) throw new ValidationError(`Projeto "${filters.project}" não encontrado.`);
+      // filtros resolvidos dentro do escopo: inexistente e fora do escopo respondem igual
+      const user = filters.user ? matchUser(scopeUsers(db as Db, actor.user), filters.user) : undefined;
+      if (filters.user && !user) throw new NotFoundError(`Usuário "${filters.user}" não encontrado no seu escopo.`);
+      const project = filters.project ? findProject(db as Db, actor.user, filters.project, { includeArchived: true }) : undefined;
+      if (filters.project && !project) throw new NotFoundError(`Projeto "${filters.project}" não encontrado ou fora do seu escopo de acesso.`);
       const text = filters.text?.toLowerCase();
       const limit = Math.min(filters.limit ?? 50, 200);
       const matches = db.audit.filter(

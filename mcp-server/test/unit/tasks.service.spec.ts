@@ -116,6 +116,11 @@ describe('TasksService.update, assign, comment e dependências', () => {
     expect(lastAudit().action).toBe('unblock');
   });
 
+  it('bloqueadora de outra organização: não encontrada, com denied na auditoria', async () => {
+    await expect(s.tasks.linkDependency(s.actor('u2'), 'PCL-101', 'CMA-101')).rejects.toBeInstanceOf(NotFoundError);
+    expect(lastAudit()).toMatchObject({ action: 'denied', summary: 'tentativa sem permissão: usar como bloqueadora de PCL-101 a tarefa CMA-101 (fora do escopo)' });
+  });
+
   it('dependência entre projetos diferentes é recusada', async () => {
     await expect(s.tasks.linkDependency(s.actor('u2'), 'PCL-103', 'PAG-101')).rejects.toThrow(/mesmo projeto/);
   });
@@ -132,6 +137,27 @@ describe('TasksService.list e get', () => {
     expect(blocked.tasks.map((t) => t.ref)).toContain('PCL-107');
     const mine = s.tasks.list(s.actor('u2'), { assignee: 'me', project: 'PCL' });
     expect(mine.tasks.every((t) => t.assignee === 'Ricardo Nogueira')).toBe(true);
+  });
+
+  it('responsável de outra organização responde igual a um inexistente', () => {
+    const msg = (who: string) => {
+      try {
+        s.tasks.list(s.actor('u2'), { assignee: who });
+        return 'ok';
+      } catch (e) {
+        return (e as Error).message.replace(who, '<x>');
+      }
+    };
+    expect(msg('renata.siqueira@atlas.eng.br')).toBe(msg('ninguem@atlas.eng.br'));
+    expect(msg('ninguem@atlas.eng.br')).toMatch(/não encontrado no seu escopo/);
+  });
+
+  it('auditoria: projeto e usuário de outra organização respondem igual a inexistentes', async () => {
+    const msg = async (filters: { project?: string; user?: string }, value: string) =>
+      s.audit.search(s.actor('u2'), filters).then(() => 'ok', (e: Error) => e.message.replace(value, '<x>'));
+    expect(await msg({ project: 'CMA' }, 'CMA')).toBe(await msg({ project: 'ZZZ' }, 'ZZZ'));
+    expect(await msg({ user: 'renata.siqueira@atlas.eng.br' }, 'renata.siqueira@atlas.eng.br')).toBe(await msg({ user: 'ninguem@x.dev' }, 'ninguem@x.dev'));
+    expect((await s.audit.search(s.actor('u1'), { project: 'CMA' })).total).toBeGreaterThan(0);
   });
 
   it('tarefa de outra organização não é encontrada', () => {

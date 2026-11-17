@@ -4,7 +4,7 @@ import * as z from 'zod';
 import { ActorResolver } from '../identity/actor.resolver.js';
 import { SCOPES } from '../mcp/auth/scopes.js';
 import { RequiresCap } from '../mcp/guards/requires-cap.decorator.js';
-import { READ_ONLY, WRITE_IDEMPOTENT } from '../mcp/schemas.js';
+import { READ_ONLY, WRITE } from '../mcp/schemas.js';
 import { WebhooksService } from './webhooks.service.js';
 
 const DeliveriesInput = z.object({
@@ -25,7 +25,8 @@ export class WebhooksMcp {
   @Tool({
     name: 'webhooks_list',
     title: 'Listar webhooks',
-    description: 'Lista as assinaturas de webhook (URL, eventos, ativa, saúde e falhas). O segredo HMAC vem mascarado.',
+    description:
+      'Lista as assinaturas de webhook (eventos, ativa, saúde e falhas nas entregas que você pode ver). URL e segredo (mascarado) só para quem gerencia webhooks.',
     annotations: READ_ONLY,
     scopes: [SCOPES.auditRead],
   })
@@ -53,7 +54,7 @@ export class WebhooksMcp {
     title: 'Reenviar entrega',
     description: 'Reenvia manualmente uma entrega (simula o endpoint recuperado: 200 OK). Só Administrador (webhook.manage).',
     inputSchema: RedeliverInput,
-    annotations: WRITE_IDEMPOTENT,
+    annotations: WRITE,
     scopes: [SCOPES.admin],
   })
   @RequiresCap('webhook.manage', 'reenviar entregas')
@@ -65,10 +66,10 @@ export class WebhooksMcp {
     uri: 'pf://catalog/events',
     name: 'event-catalog',
     title: 'Catálogo de eventos',
-    description: 'Eventos de domínio versionados que os webhooks podem assinar, quando cada um dispara e quantas ocorrências há. Payload: {id, type, occurredAt, data}.',
+    description: 'Eventos de domínio versionados que os webhooks podem assinar, quando cada um dispara e quantas ocorrências há no seu escopo. Payload: {id, type, occurredAt, data}.',
     mimeType: 'application/json',
   })
-  catalog() {
-    return { payload: '{ id, type, occurredAt, data }', events: this.webhooks.catalog() };
+  catalog(_input: unknown, ctx: McpContext) {
+    return { payload: '{ id, type, occurredAt, data }', events: this.webhooks.catalog(this.actors.resolve(ctx)) };
   }
 }

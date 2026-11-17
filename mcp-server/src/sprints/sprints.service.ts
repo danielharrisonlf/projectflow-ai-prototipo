@@ -5,7 +5,7 @@ import type { Actor } from '../domain/actor.js';
 import { isDateOnly } from '../domain/dates.js';
 import { ConflictError, DomainError, NotFoundError, ValidationError } from '../domain/errors.js';
 import { uid } from '../domain/ids.js';
-import { findProject, findSprint, rawProject, rawTask } from '../domain/lookup.js';
+import { findProject, findSprint, hiddenSprint, rawProject, rawTask } from '../domain/lookup.js';
 import type { Db, Sprint, SprintStatus } from '../domain/model.js';
 import { strOk } from '../domain/validation.js';
 import { EventsService } from '../events/events.service.js';
@@ -132,8 +132,8 @@ export class SprintsService {
    */
   async assignTasks(actor: Actor, params: { sprint: string | null; project?: string; refs: string[] }, options: BatchOptions = {}) {
     if (!can(actor.user, 'sprint.manage')) throw await this.audit.deny(actor, 'associar tarefas a sprints');
-    const sprint = params.sprint === null ? null : this.store.read((db) => findSprint(db as Db, actor.user, params.sprint!, params.project));
-    if (params.sprint !== null && !sprint) throw new NotFoundError(`Sprint "${params.sprint}" não encontrada ou fora do seu escopo de acesso.`);
+    // resolvida numa transação (sem alterações) para que uma sprint de outra organização fique na auditoria
+    const sprint = params.sprint === null ? null : await this.store.transaction((db) => this.writable(db, actor, params.sprint!, params.project));
     if (sprint?.status === 'done') throw new ConflictError(`A ${sprint.name} já foi encerrada; escolha uma sprint ativa ou planejada.`);
     const results: AssignResult[] = [];
     const total = params.refs.length;
@@ -155,7 +155,9 @@ export class SprintsService {
     try {
       return await this.store.transaction((db) => {
         const t = rawTask(db, ref);
-        if (!t || !canSeeProject(db, actor.user, t.projectId)) throw new NotFoundError('não encontrada ou fora do seu escopo');
+        const missing = 'não encontrada ou fora do seu escopo';
+        if (!t) throw new NotFoundError(missing);
+        if (!canSeeProject(db, actor.user, t.projectId)) throw this.audit.outOfScope(actor, `associar a tarefa ${t.ref} a uma sprint`, missing);
         if (sprint && t.projectId !== sprint.projectId) throw new ValidationError(`é de outro projeto que a ${sprint.name}`);
         const changed = this.tasks.applyUpdate(db, actor, t, { sprintId: sprint?.id ?? null });
         return { ref: t.ref, ok: true, detail: changed.length ? (sprint ? `associada à ${sprint.name}` : 'devolvida ao backlog') : 'já estava assim' };
@@ -166,12 +168,13 @@ export class SprintsService {
     }
   }
 
+  /** Sprint alvo de uma mutação: inexistente ou fora do escopo respondem igual; a tentativa fora do escopo é auditada. */
   private writable(db: Db, actor: Actor, ref: string, project?: string): Sprint {
     const missing = `Sprint "${ref}" não encontrada ou fora do seu escopo de acesso.`;
     const s = findSprint(db, actor.user, ref, project);
     if (s) return s;
-    const hidden = db.sprints.find((x) => x.id === ref.trim());
-    if (hidden) throw this.audit.outOfScope(actor, `alterar a sprint ${hidden.name}`, missing);
+    const hidden = hiddenSprint(db, actor.user, ref, project);
+    if (hidden) throw this.audit.outOfScope(actor, `alterar a sprint ${hidden.name} (${hidden.id})`, missing);
     throw new NotFoundError(missing);
   }
 

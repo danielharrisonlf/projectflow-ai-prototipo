@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service.js';
-import { assignAllowed, can, canSeeProject, canTouchTask, visibleProjects } from '../domain/access.js';
+import { assignAllowed, can, canSeeProject, canTouchTask, scopeUsers, visibleProjects } from '../domain/access.js';
 import type { Actor } from '../domain/actor.js';
 import { STATUS_LABELS } from '../domain/constants.js';
 import { ConflictError, NotFoundError, ValidationError } from '../domain/errors.js';
@@ -224,7 +224,7 @@ export class TasksService {
   async linkDependency(actor: Actor, ref: string, blockerRef: string) {
     return this.store.transaction((db) => {
       const t = this.writable(db, actor, ref, 'alterar dependências da tarefa');
-      const blocker = this.visibleTask(db, actor, blockerRef);
+      const blocker = this.visibleTask(db, actor, blockerRef, `usar como bloqueadora de ${t.ref} a tarefa`);
       if (t.blockedBy.includes(blocker.id)) throw new ConflictError(`${t.ref} já depende de ${blocker.ref}.`);
       this.applyUpdate(db, actor, t, { blockedBy: [...t.blockedBy, blocker.id] });
       return { task: t.ref, blockedBy: this.refs(db, t.blockedBy), blocked: isBlocked(db, t) };
@@ -234,7 +234,7 @@ export class TasksService {
   async unlinkDependency(actor: Actor, ref: string, blockerRef: string) {
     return this.store.transaction((db) => {
       const t = this.writable(db, actor, ref, 'alterar dependências da tarefa');
-      const blocker = this.visibleTask(db, actor, blockerRef);
+      const blocker = this.visibleTask(db, actor, blockerRef, `remover de ${t.ref} a dependência da tarefa`);
       if (!t.blockedBy.includes(blocker.id)) throw new ValidationError(`${t.ref} não depende de ${blocker.ref}.`);
       this.applyUpdate(db, actor, t, { blockedBy: t.blockedBy.filter((b) => b !== blocker.id) });
       return { task: t.ref, blockedBy: this.refs(db, t.blockedBy), blocked: isBlocked(db, t) };
@@ -341,9 +341,11 @@ export class TasksService {
     return t;
   }
 
-  private visibleTask(db: Db, actor: Actor, ref: string): Task {
+  /** Tarefa citada numa mutação de outra (ex.: a bloqueadora): fora do escopo também é auditada. */
+  private visibleTask(db: Db, actor: Actor, ref: string, what: string): Task {
     const t = rawTask(db, ref);
-    if (!t || !canSeeProject(db, actor.user, t.projectId)) throw new NotFoundError(this.notFound(ref));
+    if (!t) throw new NotFoundError(this.notFound(ref));
+    if (!canSeeProject(db, actor.user, t.projectId)) throw this.audit.outOfScope(actor, `${what} ${t.ref}`, this.notFound(ref));
     return t;
   }
 
@@ -374,8 +376,8 @@ export class TasksService {
     if (!who) return undefined;
     if (who === 'me') return actor.user.id;
     if (who === 'none') return null;
-    const u = matchUser(db.users, who);
-    if (!u) throw new ValidationError(`Responsável "${who}" não encontrado.`);
+    const u = matchUser(scopeUsers(db, actor.user), who);
+    if (!u) throw new NotFoundError(`Responsável "${who}" não encontrado no seu escopo.`);
     return u.id;
   }
 

@@ -37,7 +37,7 @@ export class IdentityMcp {
         scopes: ctx.authInfo ? ctx.authInfo.scopes : null,
         note: ctx.transport === 'stdio' ? 'stdio: identidade por PF_USER; scopes OAuth não se aplicam.' : 'HTTP: identidade e scopes do token Bearer.',
       },
-      state: { location: this.store.location, seedVersion: db.meta.seedVersion },
+      state: { seedVersion: db.meta.seedVersion },
     }));
   }
 

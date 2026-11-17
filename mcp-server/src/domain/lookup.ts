@@ -27,7 +27,7 @@ export function findTask(db: Db, user: User, ref: string): Task | null {
 /** Pessoa por id, e-mail ou nome completo (sem diferenciar maiúsculas). */
 export function matchUser(users: User[], who: string): User | undefined {
   const key = who.trim().toLowerCase();
-  return users.find((u) => u.id === who.trim() || u.email.toLowerCase() === key || u.name.toLowerCase() === key);
+  return users.find((u) => u.id === who.trim() || (u.email ?? '').toLowerCase() === key || (u.name ?? '').toLowerCase() === key);
 }
 
 export function findMember(db: Db, projectId: string, who: string): User | undefined {
@@ -45,4 +45,16 @@ export function findSprint(db: Db, user: User, ref: string, projectRef?: string)
     (s) => s.name.toLowerCase() === name && (project ? s.projectId === project.id : canSeeProject(db, user, s.projectId)),
   );
   return candidates.length === 1 ? candidates[0]! : null;
+}
+
+/** Sprint que corresponde à referência mas está fora do escopo do usuário (para auditar a tentativa). */
+export function hiddenSprint(db: Db, user: User, ref: string, projectRef?: string): Sprint | undefined {
+  const name = ref.trim().toLowerCase();
+  const project = projectRef ? rawProject(db, projectRef) : undefined;
+  if (projectRef && !project) return undefined;
+  return db.sprints.find(
+    (s) =>
+      (s.id === ref.trim() || (s.name.toLowerCase() === name && (!project || s.projectId === project.id))) &&
+      !canSeeProject(db, user, s.projectId),
+  );
 }

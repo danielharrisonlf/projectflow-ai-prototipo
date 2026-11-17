@@ -27,7 +27,24 @@ afterAll(async () => {
 it('GET /health responde com as primitivas registradas', async () => {
   const response = await fetch(new URL('/health', url));
   expect(response.status).toBe(200);
-  expect(await response.json()).toMatchObject({ status: 'ok', primitives: { tools: 30, resources: 4, resourceTemplates: 4, prompts: 4 } });
+  const body = await response.json();
+  // sem autenticação: só situação, versão e primitivas — nenhum dado do estado
+  expect(body).toEqual({ status: 'ok', server: { name: 'projectflow', version: '1.0.0' }, primitives: { tools: 30, resources: 4, resourceTemplates: 4, prompts: 4 } });
+});
+
+it('Host fora da lista recebe 403 (anti DNS rebinding)', async () => {
+  const { request } = await import('node:http');
+  const status = (host: string) =>
+    new Promise<number | undefined>((resolve, reject) => {
+      const req = request(url, { method: 'POST', headers: { ...headers, host, authorization: `Bearer ${TOKENS.gestor}` } }, (res) => {
+        res.resume();
+        resolve(res.statusCode);
+      });
+      req.on('error', reject);
+      req.end(toolsList);
+    });
+  expect(await status('evil.example')).toBe(403);
+  expect(await status(`localhost:${url.port}`)).toBe(200);
 });
 
 it('sem token: 401 com WWW-Authenticate apontando o resource_metadata', async () => {

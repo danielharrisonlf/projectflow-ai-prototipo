@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service.js';
-import { can } from '../domain/access.js';
+import { can, canSeeProject } from '../domain/access.js';
 import type { Actor } from '../domain/actor.js';
 import { EVENT_CATALOG } from '../domain/constants.js';
 import { ConflictError, NotFoundError } from '../domain/errors.js';
-import type { Delivery } from '../domain/model.js';
+import type { Db, Delivery, DomainEvent } from '../domain/model.js';
 import { StateStore } from '../state/state.store.js';
 
 export interface DeliveryFilters {
@@ -12,6 +12,12 @@ export interface DeliveryFilters {
   status?: 'success' | 'failed';
   eventType?: string;
   limit?: number;
+}
+
+/** Evento visível: de projeto no escopo do usuário; eventos sem projeto (ping), só para o admin. */
+function eventVisible(db: Db, actor: Actor, ev: DomainEvent): boolean {
+  if (actor.user.roleId === 'admin') return true;
+  return ev.projectId != null && canSeeProject(db, actor.user, ev.projectId, { includeArchived: true });
 }
 
 function maskSecret(secret: string): string {
@@ -25,23 +31,31 @@ export class WebhooksService {
     private readonly audit: AuditService,
   ) {}
 
-  /** Catálogo de eventos de webhook com o número de ocorrências no estado atual. */
-  catalog() {
-    return this.store.read((db) =>
-      EVENT_CATALOG.map((e) => ({ ...e, occurrences: db.events.filter((ev) => ev.type === e.type).length })),
-    );
+  /** Catálogo de eventos de webhook com o número de ocorrências visíveis para o usuário. */
+  catalog(actor: Actor) {
+    return this.store.read((db) => {
+      const visible = db.events.filter((ev) => eventVisible(db as Db, actor, ev));
+      return EVENT_CATALOG.map((e) => ({ ...e, occurrences: visible.filter((ev) => ev.type === e.type).length }));
+    });
   }
 
+  /**
+   * Assinaturas de webhook. No protótipo elas não pertencem a uma organização; por isso a URL
+   * (que revela a integração) e o segredo mascarado só aparecem para quem gerencia webhooks
+   * (webhook.manage, o Administrador). Os contadores consideram só entregas de eventos visíveis.
+   */
   async list(actor: Actor) {
     if (!can(actor.user, 'webhook.view')) throw await this.audit.deny(actor, 'ver webhooks');
-    return this.store.read((db) =>
-      db.webhooks.map((wh) => {
-        const mine = db.deliveries.filter((d) => d.webhookId === wh.id);
+    const manager = can(actor.user, 'webhook.manage');
+    return this.store.read((db) => {
+      const visible = this.visibleDeliveries(db as Db, actor);
+      return db.webhooks.map((wh) => {
+        const mine = visible.filter((d) => d.webhookId === wh.id);
         return {
           id: wh.id,
           name: wh.name,
-          url: wh.url,
-          secret: maskSecret(wh.secret),
+          url: manager ? wh.url : null,
+          secret: manager ? maskSecret(wh.secret) : null,
           events: wh.events,
           active: wh.active,
           health: wh.health,
@@ -49,8 +63,8 @@ export class WebhooksService {
           deliveries: mine.length,
           failedDeliveries: mine.filter((d) => d.status === 'failed').length,
         };
-      }),
-    );
+      });
+    });
   }
 
   async deliveries(actor: Actor, filters: DeliveryFilters) {
@@ -58,7 +72,7 @@ export class WebhooksService {
     return this.store.read((db) => {
       const wh = filters.webhook ? db.webhooks.find((w) => w.id === filters.webhook || w.name.toLowerCase() === filters.webhook!.toLowerCase()) : undefined;
       if (filters.webhook && !wh) throw new NotFoundError(`Webhook "${filters.webhook}" não encontrado.`);
-      const list = db.deliveries.filter(
+      const list = this.visibleDeliveries(db as Db, actor).filter(
         (d) => (!wh || d.webhookId === wh.id) && (!filters.status || d.status === filters.status) && (!filters.eventType || d.eventType === filters.eventType),
       );
       return {
@@ -87,6 +101,15 @@ export class WebhooksService {
         summary: `reenviou manualmente o evento ${dl.eventType} para ${wh.name}`,
       });
       return this.present(dl, wh.name);
+    });
+  }
+
+  /** Entregas de eventos que o usuário pode ver (projetos do seu escopo de organização). */
+  private visibleDeliveries(db: Db, actor: Actor): Delivery[] {
+    const events = new Map(db.events.map((ev) => [ev.id, ev]));
+    return db.deliveries.filter((d) => {
+      const ev = events.get(d.eventId);
+      return ev ? eventVisible(db, actor, ev) : actor.user.roleId === 'admin';
     });
   }
 
