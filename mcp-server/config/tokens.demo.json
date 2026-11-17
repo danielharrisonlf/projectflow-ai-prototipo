@@ -1,0 +1,41 @@
+{
+  "$comment": "Tokens de DEMONSTRAÇÃO (públicos, não use em produção). Cada token representa um usuário do seed e limita o agente aos scopes listados. Troque com PF_TOKENS_FILE ou PF_TOKENS.",
+  "tokens": [
+    {
+      "token": "pf-demo-admin-7c2e9a41d3",
+      "profile": "admin",
+      "userId": "u1",
+      "scopes": ["projects:read", "projects:write", "tasks:read", "tasks:write", "sprints:write", "audit:read", "admin"]
+    },
+    {
+      "token": "pf-demo-gestor-5b81f0c6aa",
+      "profile": "gestor",
+      "userId": "u2",
+      "scopes": ["projects:read", "projects:write", "tasks:read", "tasks:write", "sprints:write", "audit:read"]
+    },
+    {
+      "token": "pf-demo-gestor-leitura-e4d2c9",
+      "profile": "gestor-leitura",
+      "userId": "u2",
+      "scopes": ["projects:read", "tasks:read"]
+    },
+    {
+      "token": "pf-demo-lider-93ad17be42",
+      "profile": "lider",
+      "userId": "u4",
+      "scopes": ["projects:read", "tasks:read", "tasks:write"]
+    },
+    {
+      "token": "pf-demo-dev-2f6c84d1e9",
+      "profile": "dev",
+      "userId": "u8",
+      "scopes": ["projects:read", "tasks:read", "tasks:write"]
+    },
+    {
+      "token": "pf-demo-auditor-c07b5e3f18",
+      "profile": "auditor",
+      "userId": "u18",
+      "scopes": ["projects:read", "tasks:read", "audit:read"]
+    }
+  ]
+}
