@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "projectflow": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["mcp-server/dist/stdio.js"],
+      "env": {
+        "PF_USER": "ricardo.nogueira@vetorlabs.dev"
+      }
+    }
+  }
+}
