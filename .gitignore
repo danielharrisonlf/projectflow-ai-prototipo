@@ -3,3 +3,9 @@ dist/
 .DS_Store
 Thumbs.db
 *.log
+
+# servidor MCP (mcp-server/)
+mcp-server/node_modules/
+mcp-server/dist/
+mcp-server/data/*.json
+mcp-server/data/*.tmp

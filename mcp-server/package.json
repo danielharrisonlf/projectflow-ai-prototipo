@@ -1,0 +1,40 @@
+{
+  "name": "projectflow-mcp-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Servidor MCP do ProjectFlow AI em NestJS com @nestjs/mcp: ferramentas, recursos e prompts sobre o estado do protótipo.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:stdio": "node dist/stdio.js",
+    "dev": "node scripts/dev.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src test",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.4.0",
+    "@nestjs/common": "^12.5.1",
+    "@nestjs/core": "^12.5.1",
+    "@nestjs/mcp": "0.0.4",
+    "@nestjs/platform-express": "^12.5.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@nestjs/testing": "^12.5.1",
+    "@types/node": "^24.19.2",
+    "oxlint": "1.91.0",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
