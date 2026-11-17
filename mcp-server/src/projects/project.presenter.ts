@@ -26,7 +26,7 @@ export function projectDetail(db: Readonly<Db>, p: Project) {
     id: p.id,
     description: p.desc ?? '',
     startDate: p.startDate ?? null,
-    createdAt: p.createdAt,
+    createdAt: p.createdAt ?? null,
     risk: { level: risk.level, label: risk.label, overdueTasks: risk.late, blockedTasks: risk.blocked },
     taskCounts: Object.fromEntries(TASK_STATUSES.map((s) => [s, tasks.filter((t) => t.status === s).length])) as Record<string, number>,
     epics: db.epics.filter((e) => e.projectId === p.id).map((e) => ({ name: e.name, status: e.status })),

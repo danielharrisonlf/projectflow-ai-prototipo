@@ -143,6 +143,12 @@ describe('estado salvo (shapeOk, migração e saneamento)', () => {
     expect(normalizeState({ meta: { seedVersion: seed.VERSION } }, seed.VERSION)).toMatchObject({ ok: false });
   });
 
+  it('recusa JSON com aninhamento excessivo sem estourar a pilha', () => {
+    const raw = JSON.parse(JSON.stringify(db));
+    raw.projects[0].deep = JSON.parse('['.repeat(100_000) + ']'.repeat(100_000));
+    expect(normalizeState(raw, seed.VERSION)).toMatchObject({ ok: false, reason: expect.stringMatching(/aninhamento/) });
+  });
+
   it('saneia status e prioridade desconhecidos', () => {
     const raw = JSON.parse(JSON.stringify(db));
     raw.tasks[0].status = 'doing';

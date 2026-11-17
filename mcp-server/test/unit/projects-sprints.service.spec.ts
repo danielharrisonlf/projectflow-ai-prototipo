@@ -19,6 +19,19 @@ describe('ProjectsService', () => {
     await expect(s.projects.create(s.actor('u2'), { name: 'Outro', key: 'PRT' })).rejects.toBeInstanceOf(ConflictError);
   });
 
+  it('chave de outra organização: mensagem neutra, igual à de uma chave da própria', async () => {
+    const atlasKey = await s.projects.create(s.actor('u2'), { name: 'X', key: 'ERP' }).catch((e: Error) => e.message);
+    const ownKey = await s.projects.create(s.actor('u2'), { name: 'X', key: 'PCL' }).catch((e: Error) => e.message);
+    expect(atlasKey).toBe('A chave ERP está indisponível; escolha outra.');
+    expect(ownKey).toBe('A chave PCL está indisponível; escolha outra.');
+  });
+
+  it('sem início informado, a entrega é validada contra hoje', async () => {
+    await expect(s.projects.create(s.actor('u2'), { name: 'Datas', key: 'DTS', targetDate: '2020-01-01' })).rejects.toThrow(/anterior ao início/);
+    const ok = await s.projects.create(s.actor('u2'), { name: 'Datas', key: 'DTS', targetDate: '2099-01-01' });
+    expect(ok.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
   it('dev não cria projetos (negação auditada)', async () => {
     await expect(s.projects.create(s.actor('u8'), { name: 'X', key: 'XX' })).rejects.toBeInstanceOf(PermissionDeniedError);
     expect(s.db().audit[0]).toMatchObject({ action: 'denied', summary: 'tentativa sem permissão: criar projetos', source: 'mcp' });
@@ -34,9 +47,13 @@ describe('ProjectsService', () => {
     await s.projects.archive(s.actor('u2'), 'WEB');
     expect(s.projects.list(s.actor('u2')).projects.map((p) => p.key)).not.toContain('WEB');
     expect(s.projects.list(s.actor('u2'), { status: 'archived' }).projects.map((p) => p.key)).toEqual(['WEB']);
-    await expect(s.projects.archive(s.actor('u2'), 'WEB')).rejects.toBeInstanceOf(ConflictError);
-    await s.projects.unarchive(s.actor('u2'), 'WEB');
+    // idempotente: a segunda chamada é sucesso sem efeito (sem auditoria nem evento)
+    const audits = s.db().audit.length;
+    expect(await s.projects.archive(s.actor('u2'), 'WEB')).toMatchObject({ key: 'WEB', archived: true, changed: false });
+    expect(s.db().audit.length).toBe(audits);
+    expect(await s.projects.unarchive(s.actor('u2'), 'WEB')).toMatchObject({ changed: true });
     expect(s.db().events[0]!.type).toBe('project.unarchived.v1');
+    expect(await s.projects.unarchive(s.actor('u2'), 'WEB')).toMatchObject({ changed: false });
   });
 
   it('exclusão em cascata sem deixar nada órfão (só admin)', async () => {
@@ -94,6 +111,24 @@ describe('SprintsService', () => {
     expect(s.db().tasks.find((t) => t.ref === 'PCL-111')!.sprintId).toBe('sp-pcl-15'); // não processada
   });
 
+  it('tentativas fora do escopo no lote e com sprint de outra organização ficam na auditoria', async () => {
+    const denied = () => s.db().audit.filter((a) => a.action === 'denied');
+    const result = await s.sprints.assignTasks(s.actor('u2'), { sprint: 'Sprint 16', project: 'PCL', refs: ['CMA-101', 'ERP-101', 'XXX-999'] });
+    expect(result.results.every((r) => !r.ok && r.detail === 'não encontrada ou fora do seu escopo')).toBe(true);
+    expect(denied().map((a) => a.summary).slice(0, 2)).toEqual([
+      'tentativa sem permissão: associar a tarefa ERP-101 a uma sprint (fora do escopo)',
+      'tentativa sem permissão: associar a tarefa CMA-101 a uma sprint (fora do escopo)',
+    ]);
+    // o seed não tem sprint na Atlas: o admin cria uma para o teste
+    const sprint = await s.sprints.create(s.actor('u1'), { project: 'CMA', name: 'Sprint Atlas', startDate: '2026-12-01', endDate: '2026-12-14' });
+    const error = await s.sprints.start(s.actor('u2'), sprint.name, 'CMA').catch((e: Error) => e);
+    expect((error as Error).message).toMatch(/não encontrada ou fora do seu escopo/);
+    expect(denied()[0]!.summary).toContain(`alterar a sprint ${sprint.name}`);
+    const byName = await s.sprints.assignTasks(s.actor('u2'), { sprint: 'Sprint Atlas', refs: ['PCL-109'] }).catch((e: Error) => e);
+    expect((byName as Error).message).toMatch(/não encontrada ou fora do seu escopo/);
+    expect(denied()[0]!.summary).toContain('alterar a sprint Sprint Atlas');
+  });
+
   it('dev não gerencia sprints', async () => {
     await expect(s.sprints.close(s.actor('u8'), 'sp-pcl-15')).rejects.toBeInstanceOf(PermissionDeniedError);
   });
@@ -127,6 +162,23 @@ describe('Insights, auditoria e webhooks', () => {
 
   it('lista webhooks com o segredo mascarado', async () => {
     const list = await s.webhooks.list(s.actor('u1'));
-    expect(list.every((w) => w.secret.endsWith('…') && w.secret.length <= 11)).toBe(true);
+    expect(list.every((w) => w.secret!.endsWith('…') && w.secret!.length <= 11)).toBe(true);
+  });
+
+  it('sem webhook.manage: assinaturas sem URL nem segredo; entregas e catálogo só do próprio escopo', async () => {
+    await s.tasks.create(s.actor('u1'), { project: 'CMA', title: 'Atividade da Atlas' }); // gera entregas de evento Atlas
+    const gestor = s.actor('u2');
+    const list = await s.webhooks.list(gestor);
+    expect(list.every((w) => w.url === null && w.secret === null)).toBe(true);
+    const db = s.db();
+    const atlas = new Set(db.projects.filter((p) => p.orgId === 'org-atlas').map((p) => p.id));
+    const projectOf = new Map(db.events.map((e) => [e.id, e.projectId]));
+    const { deliveries } = await s.webhooks.deliveries(gestor, { limit: 100 });
+    expect(deliveries.length).toBeGreaterThan(0);
+    expect(deliveries.some((d) => atlas.has(projectOf.get(d.eventId) ?? ''))).toBe(false);
+    const adminView = await s.webhooks.deliveries(s.actor('u1'), { limit: 100 });
+    expect(adminView.deliveries.some((d) => atlas.has(projectOf.get(d.eventId) ?? ''))).toBe(true);
+    const created = (who: string) => s.webhooks.catalog(s.actor(who)).find((e) => e.type === 'task.created.v1')!.occurrences;
+    expect(created('u1')).toBe(created('u2') + 1);
   });
 });

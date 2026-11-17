@@ -136,7 +136,8 @@ export class ProjectsMcp {
   @Tool({
     name: 'projects_archive',
     title: 'Arquivar projeto',
-    description: 'Arquiva um projeto: ele sai das listagens ativas (pode ser restaurado com projects_unarchive). Emite project.archived.v1.',
+    description:
+      'Arquiva um projeto: ele sai das listagens ativas (pode ser restaurado com projects_unarchive). Emite project.archived.v1. Repetir sobre um projeto já arquivado não faz nada (changed: false).',
     inputSchema: GetInput,
     annotations: WRITE_IDEMPOTENT,
     scopes: [SCOPES.projectsWrite],
@@ -149,7 +150,7 @@ export class ProjectsMcp {
   @Tool({
     name: 'projects_unarchive',
     title: 'Desarquivar projeto',
-    description: 'Restaura um projeto arquivado às listagens ativas. Emite project.unarchived.v1.',
+    description: 'Restaura um projeto arquivado às listagens ativas. Emite project.unarchived.v1. Repetir sobre um projeto ativo não faz nada (changed: false).',
     inputSchema: GetInput,
     annotations: WRITE_IDEMPOTENT,
     scopes: [SCOPES.projectsWrite],

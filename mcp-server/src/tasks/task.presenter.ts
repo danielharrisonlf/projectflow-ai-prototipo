@@ -38,8 +38,8 @@ export function taskDetail(db: Readonly<Db>, t: Task, viewer: User) {
     subtasks: db.tasks.filter((x) => x.parentId === t.id).map((x) => ({ ref: x.ref, title: x.title, status: x.status })),
     blockedBy: t.blockedBy.map(ref).filter((x) => x !== null),
     blocking: db.tasks.filter((x) => x.blockedBy.includes(t.id)).map((x) => ({ ref: x.ref, title: x.title, status: x.status })),
-    createdAt: t.createdAt,
-    updatedAt: t.updatedAt,
+    createdAt: t.createdAt ?? null,
+    updatedAt: t.updatedAt ?? null,
     doneAt: t.doneAt ?? null,
     createdBy: nameOf(db, t.createdBy),
     comments: db.comments

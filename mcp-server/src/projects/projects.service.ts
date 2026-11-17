@@ -73,13 +73,16 @@ export class ProjectsService {
         key: params.key,
         desc: params.description ?? '',
         ...(params.priority && { priority: params.priority }),
-        ...(params.startDate && { startDate: params.startDate }),
+        // sem início informado vale hoje — e a entrega é validada contra ele
+        startDate: params.startDate ?? todayLocal(),
         ...(params.targetDate && { targetDate: params.targetDate }),
       };
       const err = validateProject(fields, null);
       if (err) throw new ValidationError(err);
       const key = params.key.toUpperCase();
-      if (db.projects.some((p) => p.key === key)) throw new ConflictError(`A chave ${key} já é usada por outro projeto.`);
+      // a chave é única entre todas as organizações (é o prefixo dos refs), mas a mensagem não
+      // confirma se ela pertence a um projeto de outra organização
+      if (db.projects.some((p) => p.key === key)) throw new ConflictError(`A chave ${key} está indisponível; escolha outra.`);
       const teamIds = (params.teams ?? []).map((t) => this.resolveTeam(db, actor, t));
       const lead = params.lead ? this.resolveLead(db, params.lead, actor.user.orgId) : actor.user.id;
       const p: Project = {
@@ -92,7 +95,7 @@ export class ProjectsService {
         leadId: lead,
         priority: params.priority ?? 'medium',
         status: 'active',
-        startDate: params.startDate ?? todayLocal(),
+        startDate: fields.startDate ?? todayLocal(),
         targetDate: params.targetDate ?? null,
         archived: false,
         createdAt: new Date().toISOString(),
@@ -146,11 +149,12 @@ export class ProjectsService {
     await this.requireCap(actor, 'project.archive', 'arquivar projetos');
     return this.store.transaction((db) => {
       const p = this.writable(db, actor, ref, 'arquivar o projeto', { includeArchived: true });
-      if (p.archived) throw new ConflictError(`O projeto ${p.key} já está arquivado.`);
+      // idempotente: arquivar o que já está arquivado é sucesso sem efeito (nem auditoria, nem evento)
+      if (p.archived) return { ...projectSummary(db, p), changed: false };
       p.archived = true;
       this.audit.record(db, actor, { action: 'archive', entityType: 'project', entityId: p.id, projectId: p.id, before: { archived: false }, after: { archived: true }, summary: `arquivou o projeto ${p.name}` });
       this.events.emit(db, actor, 'project.archived.v1', p.id, p.id, { project: p.name, key: p.key });
-      return projectSummary(db, p);
+      return { ...projectSummary(db, p), changed: true };
     });
   }
 
@@ -158,11 +162,11 @@ export class ProjectsService {
     await this.requireCap(actor, 'project.archive', 'desarquivar projetos');
     return this.store.transaction((db) => {
       const p = this.writable(db, actor, ref, 'desarquivar o projeto', { includeArchived: true });
-      if (!p.archived) throw new ConflictError(`O projeto ${p.key} não está arquivado.`);
+      if (!p.archived) return { ...projectSummary(db, p), changed: false };
       p.archived = false;
       this.audit.record(db, actor, { action: 'unarchive', entityType: 'project', entityId: p.id, projectId: p.id, before: { archived: true }, after: { archived: false }, summary: `desarquivou o projeto ${p.name}` });
       this.events.emit(db, actor, 'project.unarchived.v1', p.id, p.id, { project: p.name, key: p.key });
-      return projectSummary(db, p);
+      return { ...projectSummary(db, p), changed: true };
     });
   }
 
