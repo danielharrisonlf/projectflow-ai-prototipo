@@ -16,11 +16,11 @@ import { actorOf } from './fixtures.js';
 import { InMemoryStateRepository } from './in-memory-state.repository.js';
 
 /** Services de domínio sobre o seed real do protótipo, com estado em memória. */
-export async function createServices(initial?: unknown) {
+export async function createServices(initial?: unknown, env: Record<string, string> = {}) {
   const repository = new InMemoryStateRepository(initial);
   const moduleRef = await Test.createTestingModule({
     providers: [
-      { provide: APP_CONFIG, useValue: loadConfig({ PF_TOKENS: '[]' }) },
+      { provide: APP_CONFIG, useValue: loadConfig({ PF_TOKENS: '[]', ...env }) },
       { provide: StateRepository, useValue: repository },
       SeedProvider,
       StateStore,

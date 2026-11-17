@@ -10,6 +10,8 @@ import { AppModule } from './app.module.js';
  */
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule, { logger: new McpStdioLogger() });
+  // SIGINT/SIGTERM também passam pelo encerramento (grava o histórico pendente)
+  app.enableShutdownHooks();
   await app.get(McpStdioServer).listen();
   await app.close();
 }

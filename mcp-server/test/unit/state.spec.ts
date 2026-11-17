@@ -38,7 +38,7 @@ describe('FileStateRepository + StateStore', () => {
 
   async function boot() {
     const config = loadConfig({ PF_TOKENS: '[]', PF_DATA_FILE: tmp.file });
-    const store = new StateStore(new FileStateRepository(config), new SeedProvider(config));
+    const store = new StateStore(new FileStateRepository(config), new SeedProvider(config), config);
     await store.onModuleInit();
     return store;
   }
@@ -75,6 +75,53 @@ describe('FileStateRepository + StateStore', () => {
     expect(store.source).toBe('prototype');
     expect(readdirSync(tmp.dir).some((f) => f.includes('.invalid-'))).toBe(true);
     expect(existsSync(tmp.file)).toBe(true);
+  });
+});
+
+describe('StateStore: persistir antes de publicar', () => {
+  it('gravação que falha não altera memória nem arquivo, e a nova tentativa não duplica', async () => {
+    const s = await createServices();
+    const before = { tasks: s.db().tasks.length, audit: s.db().audit.length, events: s.db().events.length, deliveries: s.db().deliveries.length };
+    const savedBefore = JSON.stringify(s.repository.saved);
+    s.repository.failSaves = true;
+    await expect(s.tasks.create(s.actor('u2'), { project: 'PCL', title: 'Disco cheio' })).rejects.toThrow('EACCES simulado');
+    expect({ tasks: s.db().tasks.length, audit: s.db().audit.length, events: s.db().events.length, deliveries: s.db().deliveries.length }).toEqual(before);
+    expect(JSON.stringify(s.repository.saved)).toBe(savedBefore);
+    expect(s.db().taskCounters['prj-pcl']).toBe(19);
+    s.repository.failSaves = false;
+    const created = await s.tasks.create(s.actor('u2'), { project: 'PCL', title: 'Disco cheio' });
+    expect(created.ref).toBe('PCL-120'); // a tentativa anterior não deixou rastro
+    expect(s.db().tasks.filter((t) => t.title === 'Disco cheio')).toHaveLength(1);
+    await s.moduleRef.close();
+  });
+
+  it('transações simultâneas são serializadas (refs únicos)', async () => {
+    const s = await createServices();
+    const results = await Promise.all(Array.from({ length: 20 }, (_, i) => s.tasks.create(s.actor('u2'), { project: 'PCL', title: `paralela ${i}` })));
+    expect(new Set(results.map((r) => r.ref)).size).toBe(20);
+    expect(s.repository.saved!.tasks.filter((t) => t.title.startsWith('paralela'))).toHaveLength(20);
+    await s.moduleRef.close();
+  });
+
+  it('histórico de execuções é gravado agrupado, não a cada chamada, e no encerramento', async () => {
+    const s = await createServices();
+    const saves = s.repository.saves;
+    for (let i = 0; i < 10; i++) {
+      await s.store.recordExecution({ id: `mx-t${i}`, ts: new Date().toISOString(), agentId: null, tool: 'projects_list', args: {}, ok: true, summary: 'ok' });
+    }
+    expect(s.repository.saves).toBe(saves);
+    await s.store.onApplicationShutdown();
+    expect(s.repository.saves).toBe(saves + 1);
+    expect(s.repository.saved!.mcpExecutions[0]!.id).toBe('mx-t9');
+    await s.moduleRef.close();
+  });
+
+  it('apara o histórico no limite configurado', async () => {
+    const s = await createServices(undefined, { PF_HISTORY_LIMIT: '100' });
+    for (let i = 0; i < 30; i++) await s.tasks.create(s.actor('u2'), { project: 'PCL', title: `histórico ${i}` });
+    expect(s.db().audit).toHaveLength(100); // 75 do seed + 30 novos, aparados aos 100 mais recentes
+    expect(s.db().audit[0]!.summary).toBe('criou a tarefa PCL-149');
+    await s.moduleRef.close();
   });
 });
 

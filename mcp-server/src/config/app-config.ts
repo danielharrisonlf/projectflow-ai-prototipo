@@ -38,6 +38,7 @@ const EnvSchema = z.object({
   PF_TOKENS_FILE: z.string().optional(),
   PF_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   PF_USER: z.string().min(1).default('u2'),
+  PF_HISTORY_LIMIT: z.coerce.number().int().min(100).default(5000),
   PF_ALLOWED_ORIGINS: z.string().optional(),
   PF_ALLOWED_HOSTS: z.string().optional(),
   PF_CORS_ORIGINS: z.string().optional(),
@@ -58,6 +59,8 @@ export interface AppConfig {
   tokenTtlSeconds: number;
   /** Usuário do transporte stdio: id ou e-mail. */
   stdioUser: string;
+  /** Máximo de registros guardados em auditoria, eventos, entregas, notificações e execuções MCP. */
+  historyLimit: number;
   /** undefined = padrão do módulo (localhost); false = não checa. */
   allowedOrigins?: string[] | false;
   allowedHosts?: string[];
@@ -105,6 +108,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
     tokens: loadTokens(env),
     tokenTtlSeconds: env.PF_TOKEN_TTL_SECONDS,
     stdioUser: env.PF_USER,
+    historyLimit: env.PF_HISTORY_LIMIT,
     allowedOrigins: origins === undefined || origins === '' ? undefined : origins === 'off' ? false : csv(origins),
     allowedHosts: csv(env.PF_ALLOWED_HOSTS ?? 'localhost,127.0.0.1,[::1]'),
     corsOrigins: csv(env.PF_CORS_ORIGINS) ?? [/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/],

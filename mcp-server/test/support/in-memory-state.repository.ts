@@ -5,6 +5,8 @@ import { StateRepository } from '../../src/state/state.repository.js';
 export class InMemoryStateRepository extends StateRepository {
   saved: Db | undefined;
   saves = 0;
+  /** Simula disco cheio / sem permissão: toda gravação falha enquanto for true. */
+  failSaves = false;
 
   constructor(private initial?: unknown) {
     super();
@@ -15,6 +17,7 @@ export class InMemoryStateRepository extends StateRepository {
   }
 
   async save(db: Db): Promise<void> {
+    if (this.failSaves) throw Object.assign(new Error('EACCES simulado'), { code: 'EACCES' });
     this.saves++;
     this.saved = JSON.parse(JSON.stringify(db)) as Db;
   }
