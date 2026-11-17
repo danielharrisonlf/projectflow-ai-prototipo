@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/client';
@@ -102,4 +104,39 @@ it('PF_USER desconhecido: chamadas falham com mensagem clara', async () => {
     await ghost.client.close();
     tmp.cleanup();
   }
+});
+
+it('stdout só carrega JSON-RPC, inclusive com erros e negações (como o .mcp.json inicia: da raiz do repo)', async () => {
+  const tmp = tempState();
+  const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
+  const child = spawn(process.execPath, ['mcp-server/dist/stdio.js'], {
+    cwd: repoRoot,
+    env: { ...process.env, PF_USER: 'ricardo.nogueira@vetorlabs.dev', PF_DATA_FILE: tmp.file },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => (stdout += String(chunk)));
+  child.stderr.on('data', (chunk) => (stderr += String(chunk)));
+  const send = (message: object) => child.stdin.write(`${JSON.stringify(message)}\n`);
+  try {
+    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'raw', version: '1' } } });
+    await vi.waitFor(() => expect(stdout).toContain('"id":1'), { timeout: 15_000 });
+    send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'projects_delete', arguments: { project: 'WEB', confirm: true } } });
+    send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'tasks_move', arguments: { ref: 'PCL-101', status: 'in_review' } } });
+    send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'tasks_move', arguments: { ref: 'CMA-101', status: 'done' } } });
+    send({ jsonrpc: '2.0', id: 5, method: 'resources/read', params: { uri: 'pf://tasks/CMA-101' } });
+    await vi.waitFor(() => expect(stdout).toContain('"id":5'), { timeout: 15_000 });
+    child.stdin.end();
+    const [code] = await once(child, 'exit');
+    expect(code).toBe(0);
+  } finally {
+    child.kill();
+    tmp.cleanup();
+  }
+  const lines = stdout.trim().split('\n');
+  for (const line of lines) expect(JSON.parse(line)).toMatchObject({ jsonrpc: '2.0' });
+  expect(lines.length).toBeGreaterThanOrEqual(5);
+  expect(stderr).toContain('[McpCalls]'); // os logs foram para o stderr
 });

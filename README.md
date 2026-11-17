@@ -115,7 +115,9 @@ npm start              # HTTP: http://localhost:3333/mcp  (Authorization: Bearer
 npm run start:stdio    # stdio (PF_USER=u2 por padrão)
 ```
 
-O [`.mcp.json`](.mcp.json) na raiz registra o servidor stdio no Claude Code. Detalhes, tokens,
+O [`.mcp.json`](.mcp.json) na raiz registra o servidor stdio no Claude Code, com o caminho
+`mcp-server/dist/stdio.js` relativo à raiz do repositório. O build não vai para o git: antes de abrir
+o Claude Code rode `npm --prefix mcp-server ci && npm --prefix mcp-server run build`. Detalhes, tokens,
 catálogo completo e testes em [`mcp-server/README.md`](mcp-server/README.md).
 
 ## Limitações conhecidas

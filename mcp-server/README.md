@@ -11,7 +11,7 @@ Streamable HTTP com OAuth 2.1 (resource server) e stdio, com estado próprio per
 
 - 30 ferramentas (as 11 do protótipo com os mesmos nomes + 19 novas)
 - 4 recursos, 4 templates de recurso e 4 prompts
-- 95 testes unitários/integração + 20 e2e (HTTP e stdio reais)
+- 120 testes unitários/integração + 22 e2e (HTTP e stdio reais)
 
 ## Sumário
 
@@ -61,9 +61,13 @@ Streamable HTTP com OAuth 2.1 (resource server) e stdio, com estado próprio per
 | `src/mcp/` | verificador de tokens e scopes, guard `@RequiresCap`, interceptor de log, filtro de erros, schemas Zod e instruções do servidor |
 | `src/main.ts` / `src/stdio.ts` | os dois transportes, sobre o mesmo `AppModule` |
 
-Toda mutação roda em `StateStore.transaction()`: sobre uma cópia do estado, que só substitui o
-estado e é gravada se nada falhar — mutação, registro de auditoria, evento e entregas de webhook são
-atômicos. A exceção é a negação de permissão: o registro `denied` é gravado mesmo com a transação desfeita.
+Toda mutação roda em `StateStore.transaction()`, uma de cada vez (fila): sobre uma cópia do estado,
+que é **gravada primeiro e só depois publicada**. Se a validação ou a gravação falham (disco cheio,
+sem permissão), nada muda em memória nem no arquivo — mutação, registro de auditoria, evento e entregas
+de webhook são atômicos, e um agente que repete a chamada depois de um erro não duplica nada. A exceção
+é a negação de permissão: o registro `denied` é gravado mesmo com a transação desfeita.
+O histórico de execuções (`mcpExecutions`) não custa transação: entra na memória e vai ao disco agrupado
+(200 ms), com gravação garantida no encerramento (`enableShutdownHooks` no HTTP e no stdio).
 
 ## Instalação e execução
 
@@ -158,7 +162,7 @@ Leituras têm `readOnlyHint`/`idempotentHint`; as principais devolvem `structure
 | **projects_get** | detalhe: risco, contagem por status, épicos, marcos, sprints | projects:read | project.view |
 | **projects_create** | cria projeto (chave única 2–4 letras) · `project.created.v1` | projects:write | project.create |
 | projects_update | altera nome, descrição, prioridade, situação, datas, responsável | projects:write | project.edit |
-| projects_archive / projects_unarchive | arquiva/restaura | projects:write | project.archive |
+| projects_archive / projects_unarchive | arquiva/restaura; idempotentes (repetir devolve `changed: false`) | projects:write | project.archive |
 | projects_delete | exclui em cascata; **confirmação por elicitação** | projects:write + admin | project.delete |
 | **tasks_list** | filtros: projeto, status, responsável (`me`/`none`), sprint, tipo, prioridade, etiqueta, atraso, bloqueio, busca | tasks:read | task.view |
 | **tasks_get** | detalhe com comentários, dependências e histórico | tasks:read | task.view |
@@ -176,8 +180,8 @@ Leituras têm `readOnlyHint`/`idempotentHint`; as principais devolvem `structure
 | **teams_list** | equipes, integrantes e projetos | projects:read | team.view |
 | insights_summary | KPIs da Visão executiva | projects:read | insights.view |
 | audit_search | auditoria com filtros e diff | audit:read | audit.view |
-| webhooks_list / webhooks_deliveries | assinaturas (segredo mascarado) e entregas | audit:read | webhook.view |
-| webhooks_redeliver | reenvio manual (200 simulado) | admin | webhook.manage |
+| webhooks_list / webhooks_deliveries | assinaturas e entregas de eventos do seu escopo (URL e segredo mascarado só com webhook.manage) | audit:read | webhook.view |
+| webhooks_redeliver | reenvio manual (200 simulado; cada chamada é uma nova tentativa) | admin | webhook.manage |
 | state_export / state_import / state_reset | estado em JSON; importar/restaurar com progresso | admin | user.manage |
 
 Em negrito, as 11 do protótipo (mesmos nomes de `js/data.js`).
@@ -248,7 +252,17 @@ Cada prompt devolve duas mensagens: o contexto real como recurso JSON embutido e
     "args": ["mcp-server/dist/stdio.js"], "env": { "PF_USER": "ricardo.nogueira@vetorlabs.dev" } } } }
 ```
 
-Rode `npm run build` em `mcp-server/` antes; troque `PF_USER` para agir como outro perfil
+**Antes de abrir o Claude Code**, instale e compile o servidor (o `.mcp.json` aponta para o build,
+que não vai para o git):
+
+```bash
+npm --prefix mcp-server ci && npm --prefix mcp-server run build
+```
+
+O caminho `mcp-server/dist/stdio.js` é relativo à **raiz do repositório**: o Claude Code inicia o
+servidor a partir da pasta do projeto. O formato do `.mcp.json` não documenta um campo `cwd` nem
+aceita comentários com segurança; se o seu cliente iniciar o processo em outra pasta, troque o
+argumento pelo caminho absoluto do `dist/stdio.js`. Troque `PF_USER` para agir como outro perfil
 (`u1` admin, `u4` líder, `u8` dev, `u18` auditor).
 
 **Claude Code (HTTP)**, com o servidor no ar (`npm start`):
@@ -275,8 +289,11 @@ outros sites recebem 403. Para liberar outra origem, use `PF_ALLOWED_ORIGINS` e 
   temporário + `rename`, com novas tentativas no Windows). Formato idêntico ao `localStorage`
   `projectflow.db.v1` do protótipo — por isso `PF_DATA_FILE` pode apontar direto para um JSON
   exportado pelo botão **Configurações → Dados da demonstração → Exportar estado (JSON)**.
-- **Seed**: o `../js/data.js` do protótipo é executado com `node:vm` num sandbox com `window` falso e
-  `window.PFSeed.build()` gera o cenário — os dados não são copiados para o servidor. Fallback, se o
+- **Seed**: o `../js/data.js` do protótipo é executado com `node:vm`, num contexto próprio com um
+  `window` falso, e `window.PFSeed.build()` gera o cenário (carga e build com timeout de 5 s) — os
+  dados não são copiados para o servidor. **`node:vm` não é uma fronteira de segurança**: o código
+  executado alcança o processo. O `data.js` é tratado como código confiável do próprio repositório;
+  não aponte `PF_SEED_FILE` para arquivos de terceiros. Fallback, se o
   arquivo não puder ser executado: `PF_SEED_JSON` (um JSON exportado) e, por último, um estado mínimo
   (uma organização, os cinco papéis e um administrador `u1`, sem projetos), com aviso no log.
 - **Carga**: o estado salvo passa pela mesma validação, migração (schema 2) e saneamento do `PF.load`.
@@ -340,13 +357,16 @@ ajuste `PF_PUBLIC_URL`, `PF_ALLOWED_HOSTS` e `PF_ALLOWED_ORIGINS`.
 ```bash
 npm run typecheck   # tsc sobre src e test
 npm run lint        # oxlint
-npm test            # unitários + integração (95 testes)
-npm run test:e2e    # compila e roda HTTP real (listen(0)) e stdio real (dist/stdio.js) — 20 testes
+npm test            # unitários + integração (120 testes)
+npm run test:e2e    # compila e roda HTTP real (listen(0)) e stdio real (dist/stdio.js) — 22 testes
 ```
 
 - **Unitários** (`test/unit`): permissões e escopo, validações, ciclo de dependência, `doneAt`, uma
   sprint ativa por projeto, encerramento devolvendo ao backlog, lote com progresso/cancelamento,
-  auditoria `denied`, webhooks com 503 ×3, repositório em arquivo (atômico, corrompido), seed via `node:vm`, verificador de tokens.
+  auditoria `denied` (inclusive tentativas fora do escopo em lotes, dependências e sprints), webhooks
+  com 503 ×3, repositório em arquivo (atômico, corrompido), **falha de gravação sem efeito em memória
+  nem duplicação na nova tentativa**, transações paralelas serializadas, histórico gravado agrupado e
+  aparado, seed via `node:vm`, verificador de tokens.
 - **Integração** (`test/integration`, cliente MCP em memória do `@nestjs/mcp/testing`): catálogo,
   `callTool`/`readResource`/`getPrompt`, tokens de perfis diferentes, `InsufficientScopeError`, sem
   token (`SdkHttpError`), gestor da Vetor x tarefas da Atlas, validação de input, elicitação (aceitar e
@@ -370,6 +390,7 @@ Cada teste usa um arquivo de estado temporário próprio.
 | `PF_TOKENS` / `PF_TOKENS_FILE` | `config/tokens.demo.json` | tokens (JSON inline ou arquivo) |
 | `PF_TOKEN_TTL_SECONDS` | `3600` | validade dos tokens sem `expiresAt` |
 | `PF_USER` | `u2` | usuário do stdio (id ou e-mail) |
+| `PF_HISTORY_LIMIT` | `5000` | máximo de registros de auditoria, eventos, entregas, notificações e execuções |
 | `PF_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | `Host` aceitos (anti DNS rebinding) |
 | `PF_ALLOWED_ORIGINS` | padrão do módulo (localhost) | `Origin` aceitos; `off` desliga |
 | `PF_CORS_ORIGINS` | localhost em qualquer porta | origens do CORS do Express |
@@ -388,11 +409,24 @@ A configuração é validada com Zod na subida; valores inválidos impedem o boo
 - **`tasks_assign`** usa a regra de `core.js` (`assignAllowed`: sem `task.assign`, só atribuir a si
   mesmo), não a checagem mais estrita que o console simulado fazia.
 - **Fora do escopo = não encontrado** para o agente (como no `PF.mcpExecute`), mas a tentativa de
-  alteração entra na auditoria como `denied`.
+  alteração entra na auditoria como `denied`. Filtros por pessoa e projeto (`tasks_list`,
+  `audit_search`) são resolvidos dentro do escopo: um e-mail ou chave de outra organização responde
+  igual a um inexistente.
+- **Chave de projeto**: é única entre todas as organizações (é o prefixo dos refs). Para não confirmar
+  que a chave pertence a outra organização, a recusa é sempre neutra: "A chave ERP está indisponível; escolha outra."
+- **Webhooks sem organização**: no protótipo as assinaturas não pertencem a uma organização. Por isso
+  a URL e o segredo só aparecem para quem tem `webhook.manage` (Administrador); entregas, contadores
+  e o catálogo `pf://catalog/events` consideram só eventos de projetos do escopo de quem consulta
+  (eventos sem projeto, como o ping, só para o admin).
+- **Superfície sem autenticação**: `GET /health` devolve só situação, versão e contagem de primitivas;
+  `pf://me` não mostra o caminho do arquivo de estado (só `state_export`, para o admin).
 - **Confirmação**: elicitação no modern (com a capacidade declarada); `confirm: true` no legacy,
   inclusive em stdio, onde o SDK até permitiria perguntar — um único comportamento por era.
   `state_import` e `state_reset` pedem `confirm: true` no schema.
-- **Histórico de execuções**: chamadas de ferramenta entram em `mcpExecutions` (aba Execuções do protótipo).
+- **Histórico de execuções**: chamadas de ferramenta entram em `mcpExecutions` (aba Execuções do
+  protótipo), com gravação agrupada.
+- **Histórico limitado**: auditoria, eventos, entregas, notificações e execuções guardam no máximo
+  `PF_HISTORY_LIMIT` registros (padrão 5000), os mais recentes.
 
 ## Limitações
 
@@ -401,5 +435,7 @@ A configuração é validada com Zod na subida; valores inválidos impedem o boo
 - Tokens estáticos sem revogação; não há servidor de autorização (o `PF_AUTH_ISSUER` é ilustrativo).
 - Webhooks e notificações continuam simulados: nenhuma requisição sai do servidor.
 - Chamadas negadas pelo guard de capacidade vão para a auditoria, mas não para `mcpExecutions`.
-- A auditoria, os eventos e as entregas crescem sem limite no arquivo (a demo não faz rotação).
+- O limite de histórico descarta os registros mais antigos (não há arquivamento).
+- Uma execução de ferramenta registrada nos últimos 200 ms pode se perder se o processo for morto à força
+  (sem passar pelo encerramento); dados de negócio nunca ficam pendentes.
 - `npm audit` aponta um ReDoS no `picomatch` puxado pelo `vitest` (só dependência de desenvolvimento).

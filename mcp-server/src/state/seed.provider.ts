@@ -1,5 +1,12 @@
 /* Seed do estado inicial. Fonte única da verdade: o seed determinístico do protótipo
-   (js/data.js), executado com node:vm num sandbox com um `window` falso — nenhum dado é copiado.
+   (js/data.js), executado com node:vm num contexto próprio com um `window` falso — nenhum dado é
+   copiado para o servidor.
+
+   node:vm NÃO é uma fronteira de segurança: o código executado consegue alcançar o processo
+   (`this.constructor.constructor('return process')()`). O data.js é tratado como código
+   CONFIÁVEL do próprio repositório, como qualquer outro módulo; não aponte PF_SEED_FILE para
+   arquivos de terceiros. O contexto separado serve só para dar ao script o `window` que ele
+   espera sem poluir o escopo global; o timeout vale para a carga e para o build().
 
    Fallback, nesta ordem, se o data.js não puder ser executado:
    1. PF_SEED_JSON: um JSON exportado do protótipo (Configurações → "Exportar estado (JSON)");
@@ -22,22 +29,30 @@ export interface Seed {
   version: number | null;
 }
 
-interface PrototypeSeed {
+export interface PrototypeSeed {
+  /** Gera o cenário (JSON puro, já fora do contexto do vm). */
   build: () => unknown;
   VERSION: number;
 }
 
-/** Executa o data.js do protótipo e devolve `window.PFSeed`. */
+const VM_TIMEOUT_MS = 5000;
+
+/** Executa o data.js do protótipo (código confiável do repositório) e expõe `window.PFSeed`. */
 export function loadPrototypeSeed(file: string): PrototypeSeed {
   const code = readFileSync(file, 'utf8');
-  const sandbox: { window: Record<string, unknown> } = { window: {} };
-  createContext(sandbox);
-  runInContext(code, sandbox, { filename: file, timeout: 5000 });
-  const seed = sandbox.window.PFSeed as PrototypeSeed | undefined;
-  if (!seed || typeof seed.build !== 'function' || typeof seed.VERSION !== 'number') {
-    throw new Error(`${file} não definiu window.PFSeed { build, VERSION }`);
-  }
-  return seed;
+  const context = createContext({ window: {} });
+  runInContext(code, context, { filename: file, timeout: VM_TIMEOUT_MS });
+  const version: unknown = runInContext(
+    "typeof window.PFSeed === 'object' && window.PFSeed && typeof window.PFSeed.build === 'function' ? window.PFSeed.VERSION : undefined",
+    context,
+    { timeout: VM_TIMEOUT_MS },
+  );
+  if (typeof version !== 'number') throw new Error(`${file} não definiu window.PFSeed { build, VERSION }`);
+  return {
+    VERSION: version,
+    // o build roda dentro do contexto, com o mesmo timeout, e volta serializado (sem objetos de outro realm)
+    build: () => JSON.parse(runInContext('JSON.stringify(window.PFSeed.build())', context, { timeout: VM_TIMEOUT_MS }) as string),
+  };
 }
 
 export function minimalState(): Db {
@@ -93,8 +108,7 @@ export class SeedProvider {
   build(): Seed {
     const proto = this.prototypeSeed();
     if (proto) {
-      // JSON ida e volta: tira os objetos do realm do sandbox (outros protótipos de Array/Object)
-      const result = normalizeState(JSON.parse(JSON.stringify(proto.build())), proto.VERSION);
+      const result = normalizeState(proto.build(), proto.VERSION);
       if (result.ok) return { db: result.db, source: 'prototype', version: proto.VERSION };
       this.logger.warn(`Seed do protótipo recusado: ${result.reason}`);
     }
