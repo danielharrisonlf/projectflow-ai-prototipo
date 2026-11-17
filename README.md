@@ -82,7 +82,7 @@ negadas geram toast e registro na auditoria.
 - **Respostas da IA** — intenções fixas calculadas sobre os dados reais da demo (badge "resposta simulada" na interface).
 - **Entregas de webhook** — nenhuma requisição HTTP externa; URLs com `fail`/`.local` simulam endpoint com falhas (503 + retentativas, espelhando outbox → SNS/SQS → DLQ).
 - **Notificações** — e-mail/WhatsApp/SMS apenas registrados no histórico; canal sem provedor configurado falha de propósito (SMS).
-- **Servidor MCP** — estado e endpoint ilustrativos; a execução das ferramentas é real sobre o estado local.
+- **Servidor MCP (no navegador)** — o console da tela Agentes MCP executa as ferramentas sobre o estado local; o servidor MCP de verdade está em [`mcp-server/`](mcp-server/README.md).
 
 ## Persistência
 
@@ -90,6 +90,33 @@ Todo o estado vive no `localStorage` (`projectflow.db.v1`) e sobrevive ao reload
 **Configurações → Dados da demonstração → Restaurar dados de demonstração** volta ao
 cenário inicial. A ação exige o perfil **Administrador** e uma confirmação; o atalho no
 rodapé da sidebar só aparece para ele. Há exportação do estado em JSON.
+
+## Servidor MCP (NestJS)
+
+A pasta [`mcp-server/`](mcp-server/README.md) tem um servidor MCP real, em NestJS 12 com o módulo
+oficial `@nestjs/mcp`, que expõe a agentes de IA as mesmas regras do protótipo (papéis, escopo por
+organização e equipe, validações, auditoria com origem `mcp`, eventos e webhooks simulados):
+
+- 30 ferramentas — as 11 do console (`projects_list`, `tasks_move`…) com os mesmos nomes, mais
+  sprints, dependências, comentários, arquivamento/exclusão de projetos, insights, auditoria,
+  webhooks e exportar/importar/restaurar o estado;
+- recursos `pf://me`, `pf://projects`, `pf://roles`, `pf://catalog/events` e templates
+  `pf://projects/{key}`, `pf://projects/{key}/board`, `pf://tasks/{ref}`, `pf://sprints/{id}`;
+- prompts `planejar-sprint`, `relatorio-de-risco`, `refinar-tarefa` e `resumo-semanal`;
+- Streamable HTTP com OAuth 2.1 (tokens de demonstração por perfil e scopes) e stdio.
+
+O estado do servidor fica em `mcp-server/data/state.json`, no mesmo formato do
+**Exportar estado (JSON)** — o seed vem do próprio `js/data.js`, e um JSON exportado do protótipo
+pode ser importado para o agente trabalhar sobre os seus dados.
+
+```bash
+cd mcp-server && npm install && npm run build
+npm start              # HTTP: http://localhost:3333/mcp  (Authorization: Bearer pf-demo-gestor-5b81f0c6aa)
+npm run start:stdio    # stdio (PF_USER=u2 por padrão)
+```
+
+O [`.mcp.json`](.mcp.json) na raiz registra o servidor stdio no Claude Code. Detalhes, tokens,
+catálogo completo e testes em [`mcp-server/README.md`](mcp-server/README.md).
 
 ## Limitações conhecidas
 
