@@ -3,22 +3,103 @@
 Protótipo de alta fidelidade da plataforma de gestão de projetos **ProjectFlow AI**,
 cobrindo os dois ambientes do produto — **Workspace** (futuro frontend React) e
 **Insights** (futuro frontend Vue 3) — em HTML, CSS e JavaScript puros, com dados
-simulados e sem backend.
+simulados. Acompanha um **servidor MCP real em NestJS** ([`mcp-server/`](mcp-server/README.md))
+que expõe as mesmas regras de negócio a agentes de IA (Claude Code, Claude Desktop, MCP Inspector…).
 
 > Este protótipo valida regras de negócio, fluxos e experiência de uso. Ele não
 > substitui a implementação acadêmica definitiva em React e Vue.
 
-## Como executar
+## Início rápido
 
-Abra `index.html` diretamente no navegador (duplo clique funciona — não há
-dependências nem build), ou sirva a pasta com qualquer servidor estático:
+### Pré-requisitos
+
+| Para | Precisa de |
+|---|---|
+| Usar o protótipo | Só um navegador moderno — Chrome/Edge 123+, Firefox 120+ ou Safari 17.5+ (o CSS usa `light-dark()`) |
+| Rodar o servidor MCP | [Node.js](https://nodejs.org) **20.19 ou superior** (testado no 24) e npm |
+| Clonar | Git |
+
+### 1. Clonar
 
 ```bash
-npx http-server .   # ou: python -m http.server
+git clone https://github.com/danielharrisonlf/projectflow-ai-prototipo.git
+cd projectflow-ai-prototipo
 ```
 
-A única dependência externa é a fonte IBM Plex (Google Fonts); sem internet o
-protótipo funciona normalmente com a fonte do sistema.
+### 2. Abrir o protótipo (sem instalar nada)
+
+Abra `index.html` com duplo clique — não há build nem dependências. Se preferir servir por HTTP:
+
+```bash
+npx http-server .        # ou: python -m http.server 8080
+```
+
+e acesse o endereço mostrado no terminal (ex.: `http://localhost:8080`). Os dados são simulados e ficam
+no `localStorage` do navegador; troque de perfil pelo seletor no canto superior direito. A única
+dependência externa é a fonte IBM Plex (Google Fonts); sem internet o protótipo usa a fonte do sistema.
+
+### 3. Rodar o servidor MCP (opcional)
+
+```bash
+cd mcp-server
+npm ci                 # instala as dependências exatas do package-lock
+npm run build          # gera dist/main.js (HTTP) e dist/stdio.js (stdio)
+
+npm start              # HTTP em http://localhost:3333/mcp  (saúde: http://localhost:3333/health)
+# ou
+npm run start:stdio    # stdio, para clientes que iniciam o processo
+```
+
+O estado do servidor é criado em `mcp-server/data/state.json` na primeira execução, a partir do mesmo
+seed do protótipo (`js/data.js`). Variáveis de ambiente (`PORT`, `PF_USER`, `PF_DATA_FILE`, `PF_TOKENS_FILE`…)
+estão em [`mcp-server/README.md`](mcp-server/README.md#configuração-variáveis-de-ambiente).
+
+### 4. Conectar um agente
+
+**Claude Code (stdio, já configurado):** o [`.mcp.json`](.mcp.json) da raiz registra o servidor
+`projectflow`. Depois do passo 3 (o `dist/` não vai para o git), abra o Claude Code **na raiz do
+repositório** e aprove o servidor quando ele perguntar. O agente atua como o gestor Ricardo Nogueira;
+para outro perfil, troque `PF_USER` no `.mcp.json` (id ou e-mail de um usuário do seed).
+
+**Claude Code (HTTP):** com `npm start` rodando,
+
+```bash
+claude mcp add --transport http projectflow-http http://localhost:3333/mcp \
+  --header "Authorization: Bearer pf-demo-gestor-5b81f0c6aa"
+```
+
+**MCP Inspector (para explorar as ferramentas):**
+
+```bash
+npx @modelcontextprotocol/inspector node mcp-server/dist/stdio.js
+```
+
+Os tokens de demonstração por perfil (admin, gestor, líder, dev, auditor) e seus scopes estão em
+[`mcp-server/config/tokens.demo.json`](mcp-server/config/tokens.demo.json). **São públicos de propósito
+— não os use fora da demonstração.** Como trocar por JWT/OAuth real está em
+[`mcp-server/README.md`](mcp-server/README.md#autenticação-em-produção).
+
+### 5. Rodar os testes do servidor
+
+```bash
+cd mcp-server
+npm run typecheck && npm run lint
+npm test               # unitários + integração com cliente MCP em memória
+npm run test:e2e       # HTTP real (OAuth, Origin/Host) e stdio real — exige npm run build antes
+```
+
+## Estrutura do repositório
+
+```
+index.html, styles.css, js/   protótipo (HTML/CSS/JS puros, sem build)
+  js/data.js                  seed determinístico — fonte única dos dados (também usado pelo servidor MCP)
+  js/core.js                  estado, permissões, regras, auditoria, eventos e webhooks simulados
+  js/views-*.js               telas do Workspace, integrações e Insights
+mcp-server/                   servidor MCP em NestJS 12 + @nestjs/mcp (TypeScript, ESM)
+.mcp.json                     registro do servidor stdio para o Claude Code
+DESIGN.md                     design system: tokens, componentes, padrões e acessibilidade
+docs/                         mapeamento de implementação, auditoria e relatório de validação
+```
 
 ## Telas disponíveis
 
@@ -109,16 +190,9 @@ O estado do servidor fica em `mcp-server/data/state.json`, no mesmo formato do
 **Exportar estado (JSON)** — o seed vem do próprio `js/data.js`, e um JSON exportado do protótipo
 pode ser importado para o agente trabalhar sobre os seus dados.
 
-```bash
-cd mcp-server && npm install && npm run build
-npm start              # HTTP: http://localhost:3333/mcp  (Authorization: Bearer pf-demo-gestor-5b81f0c6aa)
-npm run start:stdio    # stdio (PF_USER=u2 por padrão)
-```
-
-O [`.mcp.json`](.mcp.json) na raiz registra o servidor stdio no Claude Code, com o caminho
-`mcp-server/dist/stdio.js` relativo à raiz do repositório. O build não vai para o git: antes de abrir
-o Claude Code rode `npm --prefix mcp-server ci && npm --prefix mcp-server run build`. Detalhes, tokens,
-catálogo completo e testes em [`mcp-server/README.md`](mcp-server/README.md).
+Como instalar, rodar e conectar está no [Início rápido](#início-rápido) (passos 3–5). Arquitetura,
+catálogo completo com exemplos, tokens e scopes, autenticação em produção, decisões e limitações em
+[`mcp-server/README.md`](mcp-server/README.md).
 
 ## Limitações conhecidas
 
